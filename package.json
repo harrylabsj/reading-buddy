@@ -26,5 +26,24 @@
     "@types/ws": "^8.5.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
+  },
+  "openclaw": {
+    "skill": true,
+    "name": "reading-buddy",
+    "description": "社交阅读平台 - 一起读书、交流心得",
+    "version": "1.0.0",
+    "author": "",
+    "commands": [
+      {
+        "name": "reading-buddy",
+        "description": "社交阅读平台命令入口",
+        "usage": "/reading-buddy [subcommand]"
+      }
+    ],
+    "permissions": {
+      "filesystem": true,
+      "database": true,
+      "network": true
+    }
   }
 }
