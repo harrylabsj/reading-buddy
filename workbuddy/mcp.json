@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "reading-buddy": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "reading-buddy-connector.mjs"
+      ],
+      "cwd": ".",
+      "runtime": {
+        "type": "node",
+        "version": "20"
+      },
+      "env": {
+        "WEREAD_API_KEY": "${WEREAD_API_KEY}"
+      },
+      "timeout": 30000
+    }
+  }
+}

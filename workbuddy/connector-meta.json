@@ -1,0 +1,23 @@
+{
+  "name": "读书搭子",
+  "name_zh": "读书搭子",
+  "name_en": "Reading Companion",
+  "description": "Read personal WeRead activity locally and turn selected notes into private reading cards.",
+  "description_zh": "在用户电脑本地读取微信读书书架和节奏，回顾选中的笔记并保存私人读书卡片。",
+  "description_en": "Read a user’s WeRead shelf and rhythm locally, revisit selected notes, and save private reading cards.",
+  "source": "reading-buddy",
+  "type": "mcp",
+  "auth_mode": "token",
+  "version": "0.2.0",
+  "minWorkbuddyVersion": "5.0.0",
+  "examples_zh": [
+    "打开我的阅读看板",
+    "回顾这本书的划线",
+    "用选中的笔记生成一张读书卡片"
+  ],
+  "examples_en": [
+    "Open my reading dashboard",
+    "Revisit highlights from this book",
+    "Create a card from my selected notes"
+  ]
+}

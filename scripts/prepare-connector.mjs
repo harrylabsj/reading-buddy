@@ -1,0 +1,18 @@
+import {writeFileSync,mkdirSync,copyFileSync,readFileSync,existsSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {renderToStaticMarkup} from 'react-dom/server';
+import React from 'react';
+import {BookOpen} from '@phosphor-icons/react';
+const root=resolve('.'),out=resolve('workbuddy');mkdirSync(out,{recursive:true});
+const built=resolve('dist/mcp/reading-buddy-connector.mjs');
+if(!existsSync(built))throw new Error('请先运行 npm run build。');
+copyFileSync(built,out+'/reading-buddy-connector.mjs');
+copyFileSync(resolve('dist/mcp/dashboard.html'),out+'/dashboard.html');
+mkdirSync(out+'/skills/reading-buddy',{recursive:true});
+copyFileSync(resolve('workbuddy/skills/reading-buddy/SKILL.md'),out+'/skills/reading-buddy/SKILL.md');
+const config={mcpServers:{'reading-buddy':{type:'stdio',command:'node',args:['reading-buddy-connector.mjs'],cwd:'.',runtime:{type:'node',version:'20'},env:{WEREAD_API_KEY:'${WEREAD_API_KEY}'},timeout:30000}}};
+writeFileSync(out+'/mcp.json',JSON.stringify(config,null,2)+'\n');
+writeFileSync(out+'/token-schema.json',JSON.stringify({title:'连接微信读书',title_en:'Connect WeRead',description:'输入你的微信读书个人 API Key。凭证仅由 WorkBuddy 保存在本机，并在启动本地读书搭子组件时注入；不会显示在阅读看板、对话或备份文件中。',description_en:'Enter your personal WeRead API key. WorkBuddy stores it locally and injects it only when starting the local Reading Buddy component. It is not shown in the dashboard, chat, or backups.',fields:[{key:'WEREAD_API_KEY',label:'微信读书 API Key',label_en:'WeRead API Key',type:'password',required:true,placeholder:'wrk-…',description:'用于同步你自己的书架、阅读统计与笔记。'}]},null,2)+'\n');
+writeFileSync(out+'/connector-meta.json',JSON.stringify({name:'读书搭子',name_zh:'读书搭子',name_en:'Reading Companion',description:'Read personal WeRead activity locally and turn selected notes into private reading cards.',description_zh:'在用户电脑本地读取微信读书书架和节奏，回顾选中的笔记并保存私人读书卡片。',description_en:'Read a user’s WeRead shelf and rhythm locally, revisit selected notes, and save private reading cards.',source:'reading-buddy',type:'mcp',auth_mode:'token',version:'0.2.0',minWorkbuddyVersion:'5.0.0',examples_zh:['打开我的阅读看板','回顾这本书的划线','用选中的笔记生成一张读书卡片'],examples_en:['Open my reading dashboard','Revisit highlights from this book','Create a card from my selected notes']},null,2)+'\n');
+writeFileSync(out+'/icon.svg',renderToStaticMarkup(React.createElement(BookOpen,{size:64,weight:'duotone',color:'#9d5523'})));
+console.log('已生成不含个人数据和凭证的本地 WorkBuddy 连接器包；未安装、注册或发布。');
