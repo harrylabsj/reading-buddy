@@ -2,7 +2,7 @@ import { getKey, readProfile, updateProfile, accountId } from './storage.mjs';
 import { normalizePeriod, normalizeShelf, finite, safeLink, safeCover, dayKey } from './domain.mjs';
 const gateway = 'https://i.weread.qq.com/api/agent/gateway';
 let active = 0, queue = [], retryAfter = 0;
-export const syncStatus = { running: false, stage: '', error: null, startedAt: null };
+export const syncStatus = { running: false, stage: '', error: null, errorStatus: null, startedAt: null };
 export class ReaderError extends Error { constructor(message, status=400) {super(message);this.status=status;} }
 async function slot() { if(active >= 3) await new Promise(resolve => queue.push(resolve)); active++; }
 function release() { active--; queue.shift()?.(); }
@@ -45,7 +45,7 @@ export async function refreshBook(bookId) {
 }
 export async function syncAll() {
   if(syncStatus.running)return;
-  syncStatus.running=true;syncStatus.error=null;syncStatus.stage='正在同步阅读时长和书架';syncStatus.startedAt=new Date().toISOString();
+  syncStatus.running=true;syncStatus.error=null;syncStatus.errorStatus=null;syncStatus.stage='正在同步阅读时长和书架';syncStatus.startedAt=new Date().toISOString();
   const identity=accountId(), initial=readProfile(), zone=initial.settings.timeZone;
   try {
     const results=await Promise.allSettled([gatewayCall('/readdata/detail',{mode:'weekly'}),gatewayCall('/readdata/detail',{mode:'monthly'}),gatewayCall('/shelf/sync'),gatewayCall('/user/notebooks',{count:100})]);
@@ -73,6 +73,6 @@ export async function syncAll() {
     if(identity!==accountId())return;
     if(noteResults.some(r=>r.status==='rejected'))updateProfile('live',p=>p.snapshot.warnings.push('部分笔记未更新，请在笔记页按书同步。'));
     syncStatus.stage='同步完成';
-  }catch(e){syncStatus.error=e.message;syncStatus.stage='同步未完成';}
+  }catch(e){syncStatus.error=e.message;syncStatus.errorStatus=e?.status??null;syncStatus.stage='同步未完成';}
   finally{syncStatus.running=false;}
 }

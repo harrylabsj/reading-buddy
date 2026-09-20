@@ -1,0 +1,20 @@
+import {lstatSync, mkdirSync, readFileSync, rmSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {join, resolve} from 'node:path';
+import {createHash} from 'node:crypto';
+
+const root=resolve('.');
+await import(new URL('./build-expert.mjs',import.meta.url));
+const parent=join(root,'dist','expert');
+const packageDir=join(parent,'reading-buddy-expert');
+const zip=join(parent,'reading-buddy-expert-0.3.0.zip');
+const checksum=zip+'.sha256';
+rmSync(zip,{force:true});
+const packed=spawnSync('zip',['-q','-r',zip,'reading-buddy-expert'],{cwd:parent,encoding:'utf8'});
+if(packed.status!==0)throw Error(packed.stderr||'无法创建专家 ZIP。');
+const tested=spawnSync('unzip',['-t',zip],{encoding:'utf8'});
+if(tested.status!==0)throw Error(tested.stderr||'专家 ZIP 校验失败。');
+const digest=createHash('sha256').update(readFileSync(zip)).digest('hex');
+await import('node:fs/promises').then(({writeFile})=>writeFile(checksum,`${digest}  ${lstatSync(zip).size}  reading-buddy-expert-0.3.0.zip\n`));
+console.log(`已生成发布候选包：${zip}`);
+console.log(`SHA-256：${digest}`);

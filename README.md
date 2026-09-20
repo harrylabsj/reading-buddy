@@ -1,6 +1,6 @@
 # 读书搭子
 
-读书搭子 v0.2.0 是运行在 WorkBuddy 内的本地微信读书伴侣：完整的今日阅读、书架、笔记回顾和复盘界面都嵌在 WorkBuddy 中；数据只保存在用户电脑上。
+读书搭子当前的产品形态是 **WorkBuddy 专家 + 内置本地 Skill + 用户自己的阅读工作台**：专家负责阅读陪伴与整理方法，Skill 在用户电脑本地同步、查询和保存数据，阅读报告作为每个用户独立生成的工作台。数据只保存在用户电脑上。
 
 ## 本机使用
 
@@ -36,12 +36,28 @@ npm start
 
 需要 AI 分析时，使用“交给 WorkBuddy”复制任务，或者在 WorkBuddy 中调用连接器。WorkBuddy 获取指定笔记、形成草稿；用户确认后调用 `reading_save_card` 写回应用。连接器不会发布微信读书书评，也不会自动发送邮件、消息或创建提醒。
 
-## WorkBuddy 本地接入
+## 专家发布候选包（当前主路径）
+
+当前状态：专家 v0.3.0 已于 2026-09-14 提交 WorkBuddy 开放平台审核，ID 为 `oe_cab59592a0d1949b`，状态“审核中”。职称“读书搭子”、花名“海纳·读书专家”，作者联系邮箱 `1711496337@qq.com`。尚未确认审核通过或公开上架，详见 `workbuddy/PUBLISHING.md`。
+
+专家是用户在 WorkBuddy 中发现和召唤「读书搭子」的入口，内置 Skill 执行本地授权、同步、笔记整理、卡片保存和报告生成。它不依赖 Buddy 应用 OAuth、不声明 MCP 或连接器依赖。
+
+```sh
+npm run build:expert
+npm run package:expert
+npm run test:expert
+```
+
+发布候选包生成在 `dist/expert/reading-buddy-expert-0.3.0.zip`。它包含专家元数据、头像、Agent 定义和完整本地 Skill，不包含用户数据、微信读书凭证、MCP 服务或连接器包。提交专家审核前，仍需在 WorkBuddy 客户端导入该 ZIP 并走通首次授权、同步和本地报告生成。
+
+用户可在专家市场召唤读书搭子，也可从灵感案例「做同款」生成自己的阅读工作台。灵感案例只能使用虚构数据；不能上传用户报告、书架、笔记或备份。
+
+## 原有连接器路径（保留）
 
 1. 将 `workbuddy/` 作为连接器包导入 WorkBuddy。包内有 `connector-meta.json`、`mcp.json`、`token-schema.json`、图标、技能、完整内嵌界面和本地连接器程序。
 2. WorkBuddy 使用托管 Node 运行时启动 `reading-buddy-connector.mjs`，用户电脑不需要预装 Node。
 3. 首次连接时，WorkBuddy 显示“微信读书 API Key”密码表单；填写后只保存在 WorkBuddy 本机凭证存储中。
-4. 打开「读书搭子」Buddy 应用或发起“打开我的阅读看板”，即可在 WorkBuddy 内使用。
+4. 在 WorkBuddy 中启用连接器后，发起“打开我的阅读看板”即可使用其内嵌界面；该连接器不等同于已创建或已发布的 Buddy 应用。
 
 连接器不创建 HTTP 监听端口，不读取 `runtime.json`。微信读书 API Key 不在连接器包、工具参数、工具返回值或备份中。
 
@@ -51,9 +67,27 @@ npm start
 
 `workbuddy/` 是可分发的本地连接器包，包含元信息、图标、stdio 配置、凭证表单、技能、本地连接器和完整内嵌界面。它没有用户数据、API Key、绝对路径或本地端口配置。
 
-公开分发前需要在 WorkBuddy 开放平台上传该连接器包，创建 Buddy 应用、绑定连接器、预览并提交审核。这些外部发布步骤尚未执行。不要将个人 `data/`、开发预览配置或访问凭证放入公开包。
+连接器包已提交 WorkBuddy 开放平台审核，**尚未确认审核通过与公开发布**。Buddy 应用不再是当前主发布路径：它需要 OAuth 注册与授权配置，而读书搭子的本地个人化场景由专家 + Skill 更直接承载。保留 Buddy 应用材料仅供未来出现专属品牌入口、多工作模式和行业能力市场需求时再评估；不要将个人 `data/`、开发预览配置或访问凭证放入公开包。
 
 本项目虽沿用了带静态构建适配的界面模板，但正式功能依赖 Node 本地服务；**仅部署 `dist/client` 或模板 Worker 不会得到完整可用产品**。不要直接把模板托管产物作为公网应用发布。
+
+## 免连接器 Skill 路径（新增，v0.3）
+
+除已提交开放平台审核的 v0.2 连接器（审核结果未确认，尚不能称为已发布）外，项目现在提供**免连接器**的 Skill 形态：不注册连接器、不启动 MCP 服务器、不需要云端业务托管或 localhost:3788，直接在用户电脑通过 WorkBuddy 的本地 Bash 工具权限执行打包脚本。
+
+```sh
+npm run build:skill   # 生成 dist/skill/reading-buddy/（esbuild 打包单文件脚本 + SKILL.md + references + 报告内嵌素材）
+npm run test:cli && npm run test:skill
+npm run cli -- status # 本地直接使用入口（该入口固定为 Skill 行为，无需也不应设置内部模式变量）
+```
+
+Skill 脚本覆盖：status、sync（等待完成）、分页书籍搜索、按书笔记查询/刷新、目标与主读书设置、个人回顾、卡片/复盘草稿与保存、备份导出/校验导入、自包含只读 HTML 阅读报告（今日/书架/笔记/复盘四区，复用已生成的阅读灯/示例书图片素材并内嵌）。输出为确定性 JSON，退出码区分参数错误(2)、缺少授权(3)、不存在(4)、请求频繁(5)与其他错误(1)。无效选项（非法 `--mode`、未知 flag、非数字分页、非法 `--status`/`--kind`/settings 子命令）一律明确报错，不静默降级；长文本支持 `--body-file` / `--reflection-file` / `--text-file` / `--input <json文件>` 从本机文件读取，避免 shell 转义。
+
+**运行前提**：WorkBuddy Skill 的脚本通过本地 Bash 执行，需要用户本机装有 Node.js 20+；普通 Skill **不会自动获得连接器托管的 Node 运行时**。
+
+**一次性凭证配置（无连接器凭证表单）**：让用户把微信读书 API Key 用系统文本编辑器保存为本机文件（仅一行），然后执行 `node scripts/reading-buddy.mjs auth import <文件>`；凭证以 0600 保存到用户级配置目录（也可用 `auth revoke` 移除，`auth status` 查看状态）。也可以直接设置 `WEREAD_API_KEY` 环境变量（优先于凭证文件）。Key 永不作为命令参数、不进入输出、备份或报告。Skill 数据默认存放在用户级平台数据目录，按凭证哈希隔离账户。
+
+**已知限制**：官方文档未提供 Skill 内嵌 GUI 直接写数据的宿主桥接，因此该路径的数据更新均为显式命令，HTML 报告为只读快照（页内搜索/筛选只影响显示）；移除连接器不会移除 Buddy 应用注册时填写的 scope / OAuth 字段，需平台侧另行处理。v0.2 连接器路径保留不变，两种形态共享同一套领域/存储/服务逻辑与数据格式。
 
 ## 数据与限制
 
@@ -73,6 +107,8 @@ npm start
 ```sh
 npm test
 npm run test:mcp
+npm run test:cli
+npm run test:skill
 npm run build
 ```
 

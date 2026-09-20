@@ -12,7 +12,14 @@
     "test": "node --test tests/domain.test.mjs tests/integration.test.mjs",
     "mcp": "node server/mcp.mjs",
     "test:mcp": "node --test tests/mcp.test.mjs",
-    "prepare:connector": "node scripts/prepare-connector.mjs"
+    "prepare:connector": "node scripts/prepare-connector.mjs",
+    "cli": "node server/cli.mjs",
+    "build:skill": "node scripts/build-skill.mjs",
+    "build:expert": "node scripts/build-expert.mjs",
+    "package:expert": "node scripts/package-expert.mjs",
+    "test:cli": "node --test tests/cli.test.mjs",
+    "test:skill": "node --test tests/skill.test.mjs tests/report-dom.test.mjs",
+    "test:expert": "node --test tests/expert.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^2.0.0",

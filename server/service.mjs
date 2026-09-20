@@ -5,10 +5,11 @@ import {dataDir,writeJson,readProfile,updateProfile,getKey,setKey,disconnect} fr
 import {settingsSchema,cardSchema,validateBackup,mergeBackup,dayKey,periodRange,cardDraft,duration} from './domain.mjs';
 import {gatewayCall,syncAll,syncStatus,refreshBook,fetchBookNotes} from './weread.mjs';
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
-export function getState(mode='live') {const p=readProfile(mode);return {...p,connection:{connected:!!getKey(),source:getKey()?'已配置个人凭证':'未连接',managedByWorkBuddy:process.env.READING_AUTH_MODE==='workbuddy'},sync:{...syncStatus},today:dayKey(new Date(),p.settings.timeZone)};}
+export function getState(mode='live') {const p=readProfile(mode);return {...p,connection:{connected:!!getKey(),source:getKey()?'已配置个人凭证':'未连接',managedByWorkBuddy:process.env.READING_AUTH_MODE==='workbuddy',managedBySkill:process.env.READING_AUTH_MODE==='skill'},sync:{...syncStatus},today:dayKey(new Date(),p.settings.timeZone)};}
 export async function action(path,mode='live',input={}) {
  const send=value=>value;
  if (process.env.READING_AUTH_MODE==='workbuddy'&&['/api/connect','/api/disconnect'].includes(path))throw fail('请在 WorkBuddy 的连接器设置中管理微信读书授权。',403);
+ if (process.env.READING_AUTH_MODE==='skill'&&['/api/connect','/api/disconnect'].includes(path))throw fail('Skill 模式请使用读书搭子脚本的 auth import / auth revoke 管理微信读书授权。',403);
       if(path==='/api/settings'){
         const value=settingsSchema.parse(input);const p=readProfile(mode);
         if(value.primaryBookId&&!p.snapshot?.books.some(b=>b.id===value.primaryBookId))throw fail('主读书不在当前书架中。');
@@ -42,7 +43,10 @@ export async function action(path,mode='live',input={}) {
         const {noteIds,reflection}=z.object({noteIds:z.array(z.string()).min(1).max(20),reflection:z.string().max(10000).default('')}).parse(input);
         const p=readProfile(mode),notes=noteIds.map(id=>p.snapshot?.notes.find(n=>n.id===id));if(notes.some(n=>!n))throw fail('有笔记尚未载入。');
         const draft=cardDraft(notes,reflection,dayKey(new Date(),p.settings.timeZone));
-        const prompt=`请使用读书搭子连接器，根据这些已选笔记写一份读书卡片草稿。不要编造个人经历或原文，区分摘录、我的理解和AI建议，保留来源。模式：${mode}，笔记ID：${noteIds.join('、')}。先调用 reading_prepare_card 获取这些笔记；我的补充理解：${reflection||'尚未提供，不代写为我的感悟'}。完成后展示草稿供我确认；我确认后再用 reading_save_card 保存。`;
+        // Skill 模式只给面向用户的措辞，不出现连接器工具名；连接器（workbuddy）路径保留原提示。
+        const prompt=process.env.READING_AUTH_MODE==='skill'
+          ?`已在本机根据所选笔记整理好读书卡片草稿（模式：${mode}；笔记：${noteIds.join('、')}）。请把草稿展示给用户确认：保留来源，区分摘录、我的理解与 AI 建议，不要编造个人经历或原文。${reflection.trim()?'已附上用户的补充理解。':'用户尚未提供个人理解，不要代写成用户的感悟。'}用户确认后，请用户告诉 WorkBuddy「保存这张读书卡片」，由 WorkBuddy 调用本 Skill 完成本机保存；保存前不要对外发布或分享。`
+          :`请使用读书搭子连接器，根据这些已选笔记写一份读书卡片草稿。不要编造个人经历或原文，区分摘录、我的理解和AI建议，保留来源。模式：${mode}，笔记ID：${noteIds.join('、')}。先调用 reading_prepare_card 获取这些笔记；我的补充理解：${reflection||'尚未提供，不代写为我的感悟'}。完成后展示草稿供我确认；我确认后再用 reading_save_card 保存。`;
         return send({title:reflection.trim()?'我的读书卡片':'阅读摘录整理',body:draft,prompt,noteIds,kind:'card'});
       }
       if(path==='/api/review'){

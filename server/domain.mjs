@@ -51,7 +51,7 @@ export const profileSchema = z.object({ schema: z.literal(1), mode: z.enum(['liv
 export function newProfile(mode = 'live') { return { schema: 1, mode, settings: { goal: 30, timeZone: 'Asia/Shanghai', primaryBookId: null }, snapshot: null, cards: [], reflections: [] }; }
 export function validateBackup(raw, expectedMode) {
   const parsed = profileSchema.parse(raw);
-  if (parsed.mode !== expectedMode) throw new Error('示例数据与个人数据不能混合导入，请切换对应模式。');
+  if (parsed.mode !== expectedMode) throw Object.assign(new Error('示例数据与个人数据不能混合导入，请切换对应模式。'),{status:400});
   if (parsed.snapshot) {
     for (const b of parsed.snapshot.books) { b.deepLink = safeLink(b.deepLink); b.cover = parsed.mode === 'demo' && b.cover === '/assets/demo-book.png' ? b.cover : safeCover(b.cover); }
     for (const n of parsed.snapshot.notes) n.deepLink = safeLink(n.deepLink);
