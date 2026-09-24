@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 async function api(path,mode='live',body){if(path==='state')return getState(mode);return action('/api/'+path,mode,body||{});}
-const server=new McpServer({name:'reading-buddy',version:'0.2.0'});
+const server=new McpServer({name:'reading-buddy',version:'1.1.0'});
 const mode=z.enum(['live','demo']).default('live').describe('live 为个人数据，demo 为独立的虚构示例。');
 const respond=fn=>async(args)=>{try{const d=await fn(args);return {content:[{type:'text',text:JSON.stringify(d)}],structuredContent:d};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}};
 const readOnly={readOnlyHint:true,destructiveHint:false,openWorldHint:false};
