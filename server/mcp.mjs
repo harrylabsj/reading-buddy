@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import {action,getState} from './service.mjs';
 import {getKey,readProfile} from './storage.mjs';
 import {syncAll} from './weread.mjs';
