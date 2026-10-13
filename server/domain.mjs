@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {readerSessionSchema} from './readers-schema.mjs';
 
 export const dayKey = (date = new Date(), zone = 'Asia/Shanghai') => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 export const shiftDay = (day, amount) => new Date(Date.parse(day + 'T12:00:00Z') + amount * 86400000).toISOString().slice(0, 10);
@@ -34,21 +35,23 @@ export function normalizeShelf(raw, notebookRows = [], previous = []) {
       progress, done, lastRead: finite(item.readUpdateTime), deepLink: safeLink(item.deepLink) || prior?.deepLink || null,
       rating: prior?.rating ?? null, weeklySeconds: null, reviewCount: n ? finite(n.reviewCount) : prior?.reviewCount ?? null,
       highlightCount: n ? finite(n.noteCount) : prior?.highlightCount ?? null, bookmarkCount: n ? finite(n.bookmarkCount) : prior?.bookmarkCount ?? null,
-      finishDate: prior?.finishDate || null, notesFetchedAt: prior?.notesFetchedAt || null };
+      finishDate: prior?.finishDate || null, notesFetchedAt: prior?.notesFetchedAt || null,
+      detailFetchedAt: prior?.detailFetchedAt || null, notesSync: prior?.notesSync || null };
   }).sort((a, b) => (b.lastRead || 0) - (a.lastRead || 0));
 }
 
 const iso = z.string().datetime();
 const nullableNumber = z.number().finite().nonnegative().nullable();
 const periodSchema = z.object({ start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), totalSeconds: nullableNumber, readDays: nullableNumber, days: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.number().finite().nonnegative()), fetchedAt: iso, source: z.string().max(80) }).nullable();
-const bookSchema = z.object({ id: z.string().min(1).max(120), title: z.string().max(1000), author: z.string().max(1000), cover: z.string().max(3000).nullable(), progress: z.number().min(0).max(100).nullable(), done: z.boolean(), lastRead: nullableNumber, deepLink: z.string().max(3000).nullable(), rating: nullableNumber, weeklySeconds: nullableNumber, reviewCount: nullableNumber, highlightCount: nullableNumber, bookmarkCount: nullableNumber, finishDate: z.string().nullable(), notesFetchedAt: z.string().nullable() });
-export const noteSchema = z.object({ id: z.string().min(1).max(200), bookId: z.string().max(120), title: z.string().max(1000), chapter: z.string().max(1000), quote: z.string().max(50000), thought: z.string().max(50000), date: z.string().max(40), type: z.enum(['highlight', 'thought']), deepLink: z.string().max(3000).nullable() });
+const bookSchema = z.object({ id: z.string().min(1).max(120), title: z.string().max(1000), author: z.string().max(1000), cover: z.string().max(3000).nullable(), progress: z.number().min(0).max(100).nullable(), done: z.boolean(), lastRead: nullableNumber, deepLink: z.string().max(3000).nullable(), rating: nullableNumber, weeklySeconds: nullableNumber, reviewCount: nullableNumber, highlightCount: nullableNumber, bookmarkCount: nullableNumber, finishDate: z.string().nullable(), notesFetchedAt: z.string().nullable(),
+  detailFetchedAt: iso.nullable().optional(), notesSync: z.object({complete:z.boolean(),cursor:z.union([z.string(),z.number()]).nullable(),reviewIds:z.array(z.string()).max(100000),lastCompleteAt:iso.nullable(),reason:z.string().nullable()}).nullable().optional() });
+export const noteSchema = z.object({ id: z.string().min(1).max(200), bookId: z.string().max(120), title: z.string().max(1000), chapter: z.string().max(1000), quote: z.string().max(50000), thought: z.string().max(50000), date: z.string().max(40), chapterUid:z.number().int().nonnegative().optional(), range:z.string().max(80).optional(), type: z.enum(['highlight', 'thought']), deepLink: z.string().max(3000).nullable() });
 export const settingsSchema = z.object({ goal: z.number().int().min(5).max(600), timeZone: z.string().refine(v => { try { new Intl.DateTimeFormat('en', { timeZone: v }); return true; } catch { return false; } }), primaryBookId: z.string().max(120).nullable() });
 export const cardSchema = z.object({ id: z.string().min(1).max(100), title: z.string().min(1).max(200), body: z.string().min(1).max(100000), createdAt: iso, updatedAt: iso, kind: z.enum(['card', 'weekly', 'monthly']), noteIds: z.array(z.string().max(200)).max(100), origin: z.enum(['local', 'workbuddy']) });
 export const profileSchema = z.object({ schema: z.literal(1), mode: z.enum(['live', 'demo']), settings: settingsSchema,
-  snapshot: z.object({ syncedAt: iso, books: z.array(bookSchema).max(20000), notes: z.array(noteSchema).max(100000), weekly: periodSchema, monthly: periodSchema, totals: z.object({ notebookBooks: nullableNumber, notes: nullableNumber, ebooks: nullableNumber, albums: nullableNumber, articles: nullableNumber }), warnings: z.array(z.string().max(500)).max(30) }).nullable(),
-  cards: z.array(cardSchema).max(10000), reflections: z.array(z.object({ noteId: z.string().max(200), text: z.string().max(10000), updatedAt: iso })).max(50000) });
-export function newProfile(mode = 'live') { return { schema: 1, mode, settings: { goal: 30, timeZone: 'Asia/Shanghai', primaryBookId: null }, snapshot: null, cards: [], reflections: [] }; }
+  snapshot: z.object({ syncedAt: iso, syncScope:z.enum(['basic','full']).optional(), books: z.array(bookSchema).max(20000), notes: z.array(noteSchema).max(100000), weekly: periodSchema, monthly: periodSchema, totals: z.object({ notebookBooks: nullableNumber, notes: nullableNumber, ebooks: nullableNumber, albums: nullableNumber, articles: nullableNumber }), warnings: z.array(z.string().max(500)).max(30) }).nullable(),
+  readerDiscoveries:z.array(readerSessionSchema).max(10).default([]), cards: z.array(cardSchema).max(10000), reflections: z.array(z.object({ noteId: z.string().max(200), text: z.string().max(10000), updatedAt: iso })).max(50000) });
+export function newProfile(mode = 'live') { return { schema: 1, mode, settings: { goal: 30, timeZone: 'Asia/Shanghai', primaryBookId: null }, snapshot: null, readerDiscoveries:[], cards: [], reflections: [] }; }
 export function validateBackup(raw, expectedMode) {
   const parsed = profileSchema.parse(raw);
   if (parsed.mode !== expectedMode) throw Object.assign(new Error('示例数据与个人数据不能混合导入，请切换对应模式。'),{status:400});
@@ -56,6 +59,7 @@ export function validateBackup(raw, expectedMode) {
     for (const b of parsed.snapshot.books) { b.deepLink = safeLink(b.deepLink); b.cover = parsed.mode === 'demo' && b.cover === '/assets/demo-book.png' ? b.cover : safeCover(b.cover); }
     for (const n of parsed.snapshot.notes) n.deepLink = safeLink(n.deepLink);
   }
+  for(const session of parsed.readerDiscoveries)for(const c of session.candidates)c.url=safeLink(c.url);
   return parsed;
 }
 export function mergeBackup(current, incoming) {
@@ -65,6 +69,7 @@ export function mergeBackup(current, incoming) {
     return [...map.values()];
   };
   return { ...current, snapshot: !current.snapshot || (incoming.snapshot && incoming.snapshot.syncedAt > current.snapshot.syncedAt) ? incoming.snapshot : current.snapshot,
+    readerDiscoveries:merge(current.readerDiscoveries||[],incoming.readerDiscoveries||[],'id','fetchedAt').sort((a,b)=>b.fetchedAt.localeCompare(a.fetchedAt)).slice(0,10),
     cards: merge(current.cards, incoming.cards, 'id'), reflections: merge(current.reflections, incoming.reflections, 'noteId') };
 }
 export function demoProfile(zone = 'Asia/Shanghai') {
@@ -79,6 +84,6 @@ export function demoProfile(zone = 'Asia/Shanghai') {
 }
 export const duration = seconds => seconds === null || seconds === undefined ? '暂不可用' : (Math.floor(seconds/3600) ? Math.floor(seconds/3600)+'小时' : '') + Math.round(seconds%3600/60)+'分钟';
 export function cardDraft(notes, reflection, today) {
-  const source = notes.map(n => [`### 《${n.title}》`, n.chapter, n.quote ? '> '+n.quote.replaceAll('\n','\n> ') : '', n.thought ? '**原有想法**\n\n'+n.thought : '', `来源：${n.date || '日期未提供'}${n.deepLink ? '\n'+n.deepLink : ''}`].filter(Boolean).join('\n\n')).join('\n\n');
-  return `# ${reflection.trim() ? '我的读书卡片' : '阅读摘录整理'}\n\n${today}\n\n${source}\n\n## 我的理解\n\n${reflection.trim() || '（写下你自己的理解）'}\n\n---\n根据所选笔记在本机整理；未使用 AI 改写。`;
+  const source = notes.map(n => [`### 《${n.title}》`, n.chapter, n.quote ? '> '+n.quote.replaceAll('\n','\n> ') : '', n.thought ? '**原有想法**\n\n'+n.thought : '',n.truncated?'（摘录已截取，完整文本仍保存在本机）':'', `来源：${n.date || '日期未提供'}${n.deepLink ? '\n'+n.deepLink : ''}`].filter(Boolean).join('\n\n')).join('\n\n');
+  return `# ${reflection.trim() ? '我的读书卡片' : '阅读摘录整理'}\n\n${today}\n\n${source}\n\n## 我的理解\n\n${reflection.trim() || '（写下你自己的理解）'}\n\n## 专家分析\n\n（依据摘录提出解释或追问，标注 AI 建议）\n\n## 下一步行动\n\n（只选一个下一次阅读时可以完成的行动）\n\n---\n根据所选笔记在本机整理；未使用 AI 改写。`;
 }

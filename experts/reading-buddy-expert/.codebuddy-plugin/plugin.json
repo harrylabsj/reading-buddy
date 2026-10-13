@@ -1,15 +1,19 @@
 {
   "name": "reading-buddy-expert",
-  "version": "0.3.0",
-  "description": "A local-first WeRead reading companion that organizes shelves, notes, cards, and reviews.",
+  "version": "0.6.0",
+  "description": "A local-first WeRead reading companion that organizes shelves, notes, cards, reviews, and public reader discoveries.",
   "author": {
     "name": "北京海纳福星文化传媒有限公司",
     "email": "1711496337@qq.com"
   },
-  "agents": ["./agents/reading-buddy-expert.md"],
+  "agents": [
+    "./agents/reading-buddy-expert.md"
+  ],
   "agentName": "reading-buddy-expert",
   "expertType": "agent",
-  "skills": ["./skills/reading-buddy"],
+  "skills": [
+    "./skills/reading-buddy"
+  ],
   "displayName": {
     "zh": "海纳·读书专家",
     "en": "Haina · Reading Expert"
@@ -19,29 +23,38 @@
     "en": "Reading Buddy"
   },
   "displayDescription": {
-    "zh": "连接微信读书书架与笔记，在本机生成阅读工作台、读书卡片和周月复盘，数据始终按用户凭证独立保存。",
-    "en": "A local-first companion for WeRead shelves, notes, reading cards, and weekly or monthly reviews."
+    "zh": "连接微信读书，在本机整理笔记、读书卡片和阅读复盘，从公开想法发现值得交流的读友，数据独立保存。",
+    "en": "Organize WeRead notes, cards and reading reviews locally, and discover readers through public thoughts."
   },
   "avatar": "avatars/reading-buddy.png",
   "categoryId": "15-Education",
   "defaultInitPrompt": {
-    "zh": "连接我的微信读书，看看今天该继续读什么",
-    "en": "Connect my WeRead account and tell me what to continue reading today"
+    "zh": "帮我整理一本书的笔记，生成一张读书卡片",
+    "en": "Organize one book's notes into a reading card"
   },
   "plugin": "reading-buddy-expert",
   "tags": [
-    { "zh": "阅读复盘", "en": "Reading Review" },
-    { "zh": "读书笔记", "en": "Reading Notes" },
-    { "zh": "微信读书", "en": "WeRead" }
+    {
+      "zh": "阅读工作台",
+      "en": "Reading Workspace"
+    },
+    {
+      "zh": "阅读复盘",
+      "en": "Reading Review"
+    },
+    {
+      "zh": "发现同频人",
+      "en": "Find Like-minded Readers"
+    }
   ],
   "quickPrompts": [
     {
-      "zh": "连接我的微信读书，看看今天该继续读什么",
-      "en": "Connect my WeRead account and tell me what to continue reading today"
-    },
-    {
       "zh": "帮我整理一本书的笔记，生成一张读书卡片",
       "en": "Organize one book's notes into a reading card"
+    },
+    {
+      "zh": "帮我生成本地阅读工作台",
+      "en": "Generate my local reading workspace"
     },
     {
       "zh": "复盘我这周的阅读，并生成本地报告",

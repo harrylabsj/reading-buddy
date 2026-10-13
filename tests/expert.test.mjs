@@ -20,13 +20,22 @@ test('build produces a standalone reading buddy expert with its local Skill',()=
   const manifest=JSON.parse(readFileSync(join(out,'.codebuddy-plugin','plugin.json'),'utf8'));
   assert.equal(manifest.name,'reading-buddy-expert');
   assert.equal(manifest.expertType,'agent');
+  assert.equal(manifest.version,'0.6.0');
   assert.equal(manifest.agentName,'reading-buddy-expert');
   assert.deepEqual(manifest.skills,['./skills/reading-buddy']);
   assert.equal(manifest.categoryId,'15-Education');
   assert.equal(manifest.plugin,manifest.name);
   assert.equal(manifest.quickPrompts.length,3);
   assert.deepEqual(manifest.defaultInitPrompt,manifest.quickPrompts[0]);
-  assert.equal(manifest.tags.length,3);
+  assert.deepEqual(manifest.quickPrompts[0],{
+    zh:'帮我整理一本书的笔记，生成一张读书卡片',
+    en:"Organize one book's notes into a reading card"
+  });
+  assert.deepEqual(manifest.quickPrompts[1],{
+    zh:'帮我生成本地阅读工作台',
+    en:'Generate my local reading workspace'
+  });
+  assert.deepEqual(manifest.tags.map(tag=>tag.zh),['阅读工作台','阅读复盘','发现同频人']);
   const chinese=(manifest.displayDescription.zh.match(/[\u3400-\u9fff]/gu)||[]).length;
   assert.ok(chinese>=40&&chinese<=50,'中文市场简介须为 40—50 字');
   assert.ok(statSync(join(out,'avatars','reading-buddy.png')).size<=500*1024);
@@ -39,7 +48,7 @@ test('build produces a standalone reading buddy expert with its local Skill',()=
 test('expert candidate archive is complete and does not contain a credential fixture',()=>{
   const packed=spawnSync(process.execPath,['scripts/package-expert.mjs'],{cwd:root,encoding:'utf8'});
   assert.equal(packed.status,0,packed.stderr);
-  const zip=join(root,'dist','expert','reading-buddy-expert-0.3.0.zip');
+  const zip=join(root,'dist','expert','reading-buddy-expert-0.6.0.zip');
   assert.ok(existsSync(zip));
   const listed=spawnSync('unzip',['-Z1',zip],{encoding:'utf8'});
   assert.equal(listed.status,0,listed.stderr);

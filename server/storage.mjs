@@ -1,4 +1,4 @@
-import {mkdirSync,readFileSync,writeFileSync,renameSync,existsSync,chmodSync,openSync,closeSync,unlinkSync,statSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,renameSync,existsSync,chmodSync,openSync,closeSync,unlinkSync,statSync,readdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {homedir} from 'node:os';
 import {createHash,randomBytes} from 'node:crypto';
@@ -46,3 +46,27 @@ function load(path,mode){let p;if(existsSync(path))p=profileSchema.parse(JSON.pa
 export function readProfile(mode='live'){const path=filename(mode);return locked(path,()=>load(path,mode));}
 export function saveProfile(mode,profile){const path=filename(mode);return locked(path,()=>{const p=profileSchema.parse(profile);writeJson(path,p);return p;});}
 export function updateProfile(mode,fn){const path=filename(mode);return locked(path,()=>{const p=load(path,mode);fn(p);const parsed=profileSchema.parse(p);writeJson(path,parsed);return parsed;});}
+
+// Network operations hold a separate account lease across awaits; JSON write locks stay short.
+export function acquireSyncLease(identity=accountId()) {
+ const path=join(dataDir,`profile-${identity}.sync.lock`);let fd;
+ for(let attempt=0;attempt<2;attempt++){
+  try{fd=openSync(path,'wx',0o600);writeFileSync(fd,JSON.stringify({pid:process.pid,startedAt:new Date().toISOString()}));break;}
+  catch(e){if(e.code!=='EEXIST')throw e;
+   try{const owner=JSON.parse(readFileSync(path,'utf8'));if(Number.isInteger(owner.pid)&&owner.pid>0){try{process.kill(owner.pid,0);}catch(err){if(err.code==='ESRCH'){unlinkSync(path);continue;}}}}
+   catch{}
+   throw Object.assign(Error('本账户已有同步任务，请等待完成后重试。'),{status:409});
+  }
+ }
+ if(fd===undefined)throw Object.assign(Error('同步任务暂时无法启动，请稍后重试。'),{status:409});
+ let released=false;return ()=>{if(released)return;released=true;closeSync(fd);unlinkSync(path);};
+}
+const requestStatePath=identity=>join(dataDir,`request-state-${identity}.json`);
+export function retryDeadline(identity=accountId()){try{const value=JSON.parse(readFileSync(requestStatePath(identity),'utf8')).retryAfter;return Number.isFinite(value)?value:0;}catch{return 0;}}
+export function persistRetryDeadline(deadline,identity=accountId()){const path=requestStatePath(identity);locked(path,()=>writeJson(path,{retryAfter:Math.max(retryDeadline(identity),deadline)}));}
+export function profileHistory(){return readdirSync(dataDir).filter(name=>/^profile-([a-f0-9]{20}|unconnected)\.json$/.test(name)).map(name=>{
+ const identity=name.slice(8,-5);try{const p=profileSchema.parse(JSON.parse(readFileSync(join(dataDir,name),'utf8')));return {account:identity,current:identity===accountId(),cards:p.cards.length,reflections:p.reflections.length,syncedAt:p.snapshot?.syncedAt||null};}catch{return {account:identity,current:identity===accountId(),unreadable:true};}
+}).filter(row=>!row.current);}
+export function historicalProfile(identity){if(!/^([a-f0-9]{20}|unconnected)$/.test(identity))throw Object.assign(Error('请选择 auth history 列出的历史账户标识。'),{status:400});const path=join(dataDir,`profile-${identity}.json`);if(!existsSync(path))throw Object.assign(Error('未找到指定历史数据。'),{status:404});try{return profileSchema.parse(JSON.parse(readFileSync(path,'utf8')));}catch{throw Object.assign(Error('历史数据文件无法读取或格式不完整，原文件未修改。'),{status:400});}}
+export function hasProfileHistory(){return readdirSync(dataDir).some(name=>/^profile-([a-f0-9]{20}|unconnected)\.json$/.test(name)&&name!==`profile-${accountId()}.json`);}
+export function managedDataPaths(){return [credentialPath(),profileFile('live'),profileFile('demo'),...readdirSync(dataDir).filter(name=>/^(profile-|request-state-)/.test(name)).map(name=>join(dataDir,name))];}

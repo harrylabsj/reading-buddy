@@ -1,38 +1,43 @@
 # 命令参考
 
-所有命令：`node scripts/reading-buddy.mjs <命令> [选项] [--mode live|demo]`
+所有命令：`node scripts/reading-buddy.mjs <命令> [选项] [--mode live|demo]`。输出路径放在选项前；带空格路径用引号。除帮助外 stdout 为 JSON，失败 stderr 为 `{"ok":false,"error":{"code":…, "message":…, "retryAt":…}}`。退出码：0 成功、2 参数、3 授权、4 不存在、5 限流、1 其他错误。
 
-stdout 始终为 JSON；失败时 stderr 输出 `{"ok":false,"error":{"code":…,"message":…}}`。
-退出码：0 成功 · 2 参数/数据校验 · 3 缺少或失效授权 · 4 记录不存在 · 5 请求过于频繁 · 1 其他错误。
+## 状态、工作台和按需同步
 
-## 状态与同步
+- `doctor`：离线检查 Node.js、授权配置、快照、历史空间是否存在以及限流期限。`authorizationVerified:false` 表示配置检查未验证联网授权。
+- `status`：离线快照概要、统计、偏好与卡片数量。
+- `workspace [输出.html] [--sync] [--force] [--open]`：默认从缓存生成账户独立的工作台；`--sync` 表示用户要求联网更新基础数据，近期有效缓存会复用，`--force` 立即重新同步。`--open` 使用系统默认应用打开文件，失败时仍返回已生成路径；无个人数据时提示配置或同步，`--mode demo` 可独立体验。
+- `report <输出.html> [--open]`：兼容已有报告生成命令，无联网同步。
+- `sync [--scope basic|full] [--if-stale]`：等待完成后退出。默认 basic 只取书架、周/月统计及最近 100 本笔记目录，最多四个基础请求；full 额外补齐最多 12 本书详情与 2 本书正文。`--if-stale` 复用 15 分钟内、当前周期有效且无警告的缓存。并发任务和限流均按账户约束。
+- `book <bookId> [--refresh]`：仅补齐该书信息和进度；15 分钟内复用详情，`--refresh` 强制刷新。
+- `books [--query t] [--status all|reading|finished] [--offset n] [--limit n]`：离线分页，limit≤30；不把未知进度判为已读。
+- `notes <bookId> [--list] [--note-ids id,id] [--refresh] [--restart] [--offset n] [--limit n]`：`--list` 仅返回 ID、标题、章节、日期和类型。默认正文为摘要，每字段≤800字符、单次正文≤12,000字符，不修改原文；`truncated` 标记摘要截断。`--note-ids` 限定用户选定笔记，最多20条。`--refresh` 联网按书更新，单次最多50页；不完整时保留旧笔记并保存断点，下次刷新继续，`--restart` 与 `--refresh` 同用，从首页重新核对。只有完整一轮结束后才核对移除旧记录。
 
-- `status` — 凭证状态（是否配置、来源、账户指纹，永不显示 Key）、同步状态、快照摘要、目标设置、卡片/回顾数量。离线可用。
-- `sync` — 联网同步书架、周/月统计、最近 100 本笔记概览、12 本书详情与最多 2 本书的笔记；**等待完成后退出**。返回 `warnings`（部分失败保持显式）。无凭证时退出码 3。`--mode demo` 直接返回无需同步。
+## 整理与偏好
 
-## 查询（离线可用）
+- `review --period weekly|monthly [--note-ids id,id]`：默认统计复盘和最多30条笔记目录，无正文。所选 ID 必须在本周期且已载入；指定 ID 时只返回这些正文摘要，最多20条。`availableNotes` 表示本期已载入数量。
+- `draft --notes id,id [--reflection t|--reflection-file 文件]`：所选笔记的本机草稿；提供来源、用户理解、专家分析与下一步行动的结构。不会自行调用模型或伪造感悟。
+- `save-card --title t --body b|--body-file 文件 [--kind card|weekly|monthly] [--note-ids id,id] [--id 既有卡片] [--origin local|workbuddy]`：保存用户已确认的内容；也可单用 `--input <json文件>`，字段为 `title,body,kind,noteIds,id,origin`。AI改写的成稿使用 `workbuddy` 来源，并标注 AI 整理。
+- `reflect --note-id id --text t|--text-file 文件|--input 文件`：保存用户已确认的个人回顾，JSON字段为 `noteId,text`。
+- `settings [set --goal 5..600 --timezone Asia/Shanghai --primary-book id|null]`：偏好、主读书；修改时区后统计需重新同步。
 
-- `books [--query t] [--status all|reading|finished] [--offset n] [--limit n]`（limit ≤30）— 分页搜索已同步电子书；`total` 为筛选后总数，不含有声书/文章收藏。无快照时返回空列表与提示，不报错。
-- `notes <bookId> [--refresh] [--offset n] [--limit n]` — 某本书的已载入笔记；`--refresh` 需联网逐页更新（上限 50 页，超出会在数据中留下部分载入提示）。输出含 `totalLoaded`、`nextOffset` 与“已载入部分”说明。
+## 凭证与历史恢复
 
-## 偏好与整理
+- `auth status`：仅显示本机配置、来源和账户指纹，不代表已验证联网授权。
+- `auth import <用户指定文件>`：导入一行 Key 到0600私有凭证文件；环境变量优先，原始文件可由用户删除。
+- `auth revoke`：移除凭证文件；环境变量仍有效时明确提示。
+- `auth history`：列出当前空间之外的本机历史标识、数量和同步时间，无笔记/卡片正文；未授权的本机空间使用 `unconnected` 标识。
+- `auth export-history <历史标识> <输出.json>`：导出指定旧空间到私有备份，保留旧文件。必须先由用户确认归属再调用；之后显式 `backup import <备份>` 恢复到当前空间，不自动合并其他账户。
+- `backup export <路径>` / `backup import <路径>`：私有导出、校验与去重合并。live/demo不可混导，导入前保存恢复副本。报告/导出不可覆盖任何已有受管账户文件或凭证文件。
 
-- `settings` / `settings set --goal n --timezone Asia/Shanghai --primary-book <id|null>` — 每日目标（分钟）、时区、主读书；主读书必须在当前书架中。修改时区会标记周/月统计需重新同步。
-- `reflect --note-id <id> --text <text>` — 为一条笔记保存个人回顾；长文本用 `--text-file <文件>` 或 `--input <json文件>`（`{"noteId":"…","text":"…"}`）。
-- `draft --notes <id,id…> [--reflection t]` — 由选定笔记（≤20 条）生成本机卡片草稿，保留来源，不伪造个人感悟；长反思用 `--reflection-file <文件>`。
-- `review --period weekly|monthly` — 复盘草稿；缺失数据保持空白，不补造。
-- `save-card --title t --body b [--kind card|weekly|monthly] [--note-ids id,id] [--id 既有卡片]` — 保存本机卡片/复盘（更新同 id 卡片），仅用户明确要求后使用；正文含特殊字符时用 `--body-file <文件>` 或 `--input <json文件>`。
+未知选项、错误布尔值、非法分页、错误同步范围和缺失参数均在相关操作开始前报错。`--force` 仅在 `workspace --sync` 下使用；`--restart` 仅在 `notes --refresh` 下使用。
 
-无效输入一律以退出码 2 明确失败：`--mode` 不是 live/demo、未知 `--flag`、`--status`/`--kind`/`--period` 非法、分页参数不是范围内整数、`settings` 子命令不是 set。
+## 公开读友发现
 
-## 备份与报告
+- `find-book <书名>`：联网搜索电子书（最多返回15条片段），没有个人书架也能使用；书名有歧义时让用户选书。
+- `highlights <bookId>`：取得最多20条热门划线，包含 `chapterUid`、`range` 和原文片段；不包含读友列表。
+- `readers <bookId> [--question 问题] [--chapter-uid n --range a-b] [--refresh]`：书级最多2段热门划线（各2页）及2页书评；段落级最多2页。每页20条，最多8次请求（含按需书籍详情）。15分钟内复用同条件缓存，refresh强制刷新。问题只用于本地整理，不发给微信读书接口。
+- `readers-list [--session id] [--view popular|resonance|perspective] [--offset n]`：离线目录、对应视角和候选摘录（每次20条，每条正文≤500字、原文≤100字）。
+- `readers-curate --input <JSON文件>`：保存实际候选的推荐理由，字段和流程见 [readers.md](readers.md)。随后运行 `workspace --open`。
 
-- `backup export <路径>` — 导出本机数据（0600 私有权限），不含凭证。
-- `backup import <路径>` — 校验备份（个人/示例数据不可混导）、导入前自动保存恢复副本、按更新时间与 id 去重合并。
-- `report <输出.html>` — 自包含只读 HTML 报告（今日/书架/笔记/复盘四区，0600 权限），不含凭证；页内交互只影响显示。
-
-## 凭证
-
-- `auth status` — 是否已配置、来源（环境变量 / 本机凭证文件）、凭证文件路径、账户指纹。
-- `auth import <文件>` — 从用户指定的本机文件读取 Key（一行，不写进命令参数），校验格式后以 0600 存入用户级配置目录。
-- `auth revoke` — 删除本机凭证文件；若 Key 来自环境变量则提示需另行移除。
+最近10次发现保存在账户独立的本机文件中，旧缓存淘汰不会改动笔记和卡片。网络失败、429或升级要求不会覆盖已有发现，也不会自动反复重试。刷新成功后原推荐理由清空，须基于新快照重新整理。

@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {dataDir,writeJson,readProfile,updateProfile,getKey,setKey,disconnect} from './storage.mjs';
 import {settingsSchema,cardSchema,validateBackup,mergeBackup,dayKey,periodRange,cardDraft,duration} from './domain.mjs';
 import {gatewayCall,syncAll,syncStatus,refreshBook,fetchBookNotes} from './weread.mjs';
+import {noteCatalog,noteExcerpts} from './selection.mjs';
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function getState(mode='live') {const p=readProfile(mode);return {...p,connection:{connected:!!getKey(),source:getKey()?'已配置个人凭证':'未连接',managedByWorkBuddy:process.env.READING_AUTH_MODE==='workbuddy',managedBySkill:process.env.READING_AUTH_MODE==='skill'},sync:{...syncStatus},today:dayKey(new Date(),p.settings.timeZone)};}
 export async function action(path,mode='live',input={}) {
@@ -42,19 +43,23 @@ export async function action(path,mode='live',input={}) {
       if(path==='/api/draft'||path==='/api/prepare-workbuddy'){
         const {noteIds,reflection}=z.object({noteIds:z.array(z.string()).min(1).max(20),reflection:z.string().max(10000).default('')}).parse(input);
         const p=readProfile(mode),notes=noteIds.map(id=>p.snapshot?.notes.find(n=>n.id===id));if(notes.some(n=>!n))throw fail('有笔记尚未载入。');
-        const draft=cardDraft(notes,reflection,dayKey(new Date(),p.settings.timeZone));
+        const excerpts=noteExcerpts(notes);
+        const draft=cardDraft(excerpts,reflection,dayKey(new Date(),p.settings.timeZone));
         // Skill 模式只给面向用户的措辞，不出现连接器工具名；连接器（workbuddy）路径保留原提示。
         const prompt=process.env.READING_AUTH_MODE==='skill'
-          ?`已在本机根据所选笔记整理好读书卡片草稿（模式：${mode}；笔记：${noteIds.join('、')}）。请把草稿展示给用户确认：保留来源，区分摘录、我的理解与 AI 建议，不要编造个人经历或原文。${reflection.trim()?'已附上用户的补充理解。':'用户尚未提供个人理解，不要代写成用户的感悟。'}用户确认后，请用户告诉 WorkBuddy「保存这张读书卡片」，由 WorkBuddy 调用本 Skill 完成本机保存；保存前不要对外发布或分享。`
+          ?`已在本机根据所选笔记整理好读书卡片草稿（模式：${mode}；笔记：${noteIds.join('、')}）。请把草稿展示给用户确认：保留来源，区分摘录、我的理解与 AI 建议，不要编造个人经历或原文。${reflection.trim()?'已附上用户的补充理解。':'用户尚未提供个人理解，不要代写成用户的感悟。'}用户确认具体草稿或已明确要求保存该草稿时，调用本 Skill 保存；已有保存授权不重复询问。专家改写的内容应标注 AI 整理并使用 workbuddy 来源；不要沿用原始模板的未使用 AI 声明。`
           :`请使用读书搭子连接器，根据这些已选笔记写一份读书卡片草稿。不要编造个人经历或原文，区分摘录、我的理解和AI建议，保留来源。模式：${mode}，笔记ID：${noteIds.join('、')}。先调用 reading_prepare_card 获取这些笔记；我的补充理解：${reflection||'尚未提供，不代写为我的感悟'}。完成后展示草稿供我确认；我确认后再用 reading_save_card 保存。`;
-        return send({title:reflection.trim()?'我的读书卡片':'阅读摘录整理',body:draft,prompt,noteIds,kind:'card'});
+        return send({title:reflection.trim()?'我的读书卡片':'阅读摘录整理',body:draft,prompt,noteIds,kind:'card',truncated:excerpts.some(n=>n.truncated)});
       }
       if(path==='/api/review'){
-        const {period}=z.object({period:z.enum(['weekly','monthly'])}).parse(input);const p=readProfile(mode),today=dayKey(new Date(),p.settings.timeZone),range=periodRange(today,period),stats=p.snapshot?.[period];
+        const {period,noteIds}=z.object({period:z.enum(['weekly','monthly']),noteIds:z.array(z.string()).max(20).default([])}).parse(input);const p=readProfile(mode),today=dayKey(new Date(),p.settings.timeZone),range=periodRange(today,period),stats=p.snapshot?.[period];
         const valid=stats&&stats.start===range.start&&stats.end===today;
-        const notes=(p.snapshot?.notes||[]).filter(n=>n.date>=range.start&&n.date<=today),finished=(p.snapshot?.books||[]).filter(b=>b.finishDate&&b.finishDate>=range.start&&b.finishDate<=today);
-        const text=`# ${period==='weekly'?'本周':'本月'}阅读复盘\n\n${range.start} — ${today}\n\n## 阅读节奏\n\n总时长：${valid?duration(stats.totalSeconds):'当前周期尚未同步'}\n有效阅读天数：${valid?(stats.readDays??'暂不可用'):'暂不可用'}\n数据更新：${stats?.fetchedAt||'尚未同步'}\n\n## 已核对的读完记录\n\n${finished.length?finished.map(b=>'- 《'+b.title+'》 · '+b.finishDate).join('\n'):'暂无已核对的本期完成日期；不等于本期没有读完。'}\n\n## 已载入的本期笔记\n\n${notes.length?notes.slice(0,12).map(n=>`- 《${n.title}》${n.chapter?' · '+n.chapter:''}：${(n.thought||n.quote).slice(0,500)}`).join('\n\n'):'当前未载入本期笔记，可按书继续同步。'}\n\n## 我的收获\n\n（写下一个值得记住的想法）\n\n## 下一步阅读\n\n（决定接下来继续读什么）\n\n---\n本机数据整理，笔记和完成记录可能仅为已载入部分；未使用AI改写。`;
-        return send({title:period==='weekly'?'本周阅读复盘':'本月阅读复盘',body:text,kind:period,noteIds:notes.slice(0,12).map(n=>n.id)});
+        const available=(p.snapshot?.notes||[]).filter(n=>n.date>=range.start&&n.date<=today),finished=(p.snapshot?.books||[]).filter(b=>b.finishDate&&b.finishDate>=range.start&&b.finishDate<=today);
+        const selected=[...new Set(noteIds)].map(id=>available.find(n=>n.id===id));
+        if(selected.some(n=>!n))throw fail('所选笔记不存在或不在本次复盘周期内。');
+        const notes=noteExcerpts(selected);
+        const text=`# ${period==='weekly'?'本周':'本月'}阅读复盘\n\n${range.start} — ${today}\n\n## 阅读节奏\n\n总时长：${valid?duration(stats.totalSeconds):'当前周期尚未同步'}\n有效阅读天数：${valid?(stats.readDays??'暂不可用'):'暂不可用'}\n数据更新：${stats?.fetchedAt||'尚未同步'}\n\n## 已核对的读完记录\n\n${finished.length?finished.slice(0,30).map(b=>'- 《'+b.title.slice(0,200)+'》 · '+b.finishDate).join('\n'):'暂无已核对的本期完成日期；不等于本期没有读完。'}\n\n## 用户选定的笔记依据\n\n${notes.length?notes.map(n=>`- 《${n.title}》${n.chapter?' · '+n.chapter:''}\n${n.quote?'原文摘录：'+n.quote+'\n':''}${n.thought?'用户已有想法：'+n.thought+'\n':''}${n.truncated?'（已截取摘要，完整文本仍保存在本机）':''}`).join('\n'):'尚未选择笔记正文。当前复盘只依据统计；可从笔记目录中选择后补充。'}\n\n## 用户理解\n\n（仅记录用户明确表达的收获）\n\n## 专家分析\n\n（基于已选依据解释一个问题，标注 AI 建议）\n\n## 下一步行动\n\n（确定下一次阅读的一本书、一个问题或一次摘录回顾）\n\n---\n本机数据整理，笔记和完成记录可能仅为已载入部分；未使用AI改写。`;
+        return send({title:period==='weekly'?'本周阅读复盘':'本月阅读复盘',body:text,kind:period,noteIds:notes.map(n=>n.id),noteCatalog:noteCatalog(available),availableNotes:available.length,catalogTruncated:available.length>30,truncated:notes.some(n=>n.truncated),scope:notes.length?'selected-notes':'statistics-only'});
       }
       if(path==='/api/cards'){
         const p=readProfile(mode),now=new Date().toISOString();const {id,title,body,kind,noteIds,origin}=z.object({id:z.string().optional(),title:z.string(),body:z.string(),kind:z.enum(['card','weekly','monthly']),noteIds:z.array(z.string()).default([]),origin:z.enum(['local','workbuddy']).default('local')}).parse(input);

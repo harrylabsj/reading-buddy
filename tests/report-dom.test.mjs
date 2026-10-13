@@ -10,6 +10,7 @@ process.env.READING_AUTH_MODE='skill';
 process.env.READING_DATA_DIR=mkdtempSync(join(tmpdir(),'reading-report-dom-data-'));
 process.env.READING_CONFIG_DIR=mkdtempSync(join(tmpdir(),'reading-report-dom-config-'));
 const {buildReport}=await import('../server/report.mjs');
+const {demoReaders}=await import('../server/readers.mjs');
 
 /* ---------- 极简 DOM（仅实现本报告脚本用到的 API） ---------- */
 class El{
@@ -192,4 +193,36 @@ test('report UI: malicious note payload is present only as inert text; links and
   const goodBtn=goodLink.children.find(c=>c.tagName==='BUTTON');
   fire(goodBtn,'click');
   assert.deepEqual(opened,['https://weread.qq.com/web/reader/a'],'只允许打开微信读书域名链接');
+});
+
+test('reader UI ranks by content, switches evidence views, and keeps demo readers unlinked',()=>{
+ const p=syntheticProfile();p.readerDiscoveries=[demoReaders()];
+ const {document}=renderReport(p),grid=document.getElementById('reader-grid');
+ assert.ok(grid.children[0].textContent.includes('山间读者'));assert.ok(!grid.textContent.includes('作者推荐位'));
+ assert.ok(grid.textContent.includes('42 个赞'));
+ assert.ok(!grid.textContent.includes('点赞数未提供'));
+ const resonance=document.querySelectorAll('[data-reader-view]').find(b=>b.dataset.readerView==='resonance');fire(resonance,'click');
+ assert.ok(grid.textContent.includes('AI 建议'));assert.ok(grid.textContent.includes('十分钟'));
+ assert.ok(grid.children[0].textContent.includes('山间读者'));assert.ok(!grid.textContent.includes('作者推荐位'));
+ const links=[];grid.walk(el=>{if(el.tagName==='A')links.push(el);});assert.equal(links.length,0);
+ const perspective=document.querySelectorAll('[data-reader-view]').find(b=>b.dataset.readerView==='perspective');fire(perspective,'click');assert.ok(grid.textContent.includes('翻页的人'));
+});
+
+test('reader UI book and note entry create scoped requests, empty views do not fabricate matches',()=>{
+ const p=syntheticProfile();p.readerDiscoveries=[];
+ const {document}=renderReport(p,{mode:'live'});
+ const shelf=document.getElementById('shelf-grid'),book=shelf.children.find(c=>c.tagName==='ARTICLE');
+ fire(book.children.find(c=>c.className==='reader-entry'),'click');
+ assert.ok(document.getElementById('page-readers').classList.contains('active'));
+ assert.ok(document.getElementById('reader-request').value.includes('进度之书'));
+ assert.ok(document.getElementById('reader-grid').textContent.includes('还没有读友发现记录'));
+ const note=document.getElementById('notes-list').children[0];fire(note.children.find(c=>c.className==='reader-entry'),'click');
+ assert.ok(document.getElementById('reader-request').value.includes('划线的原文'));
+ assert.ok(document.getElementById('reader-request').value.includes('找不到时不要替换'));
+});
+
+test('reader content and AI reasons render as text and unsafe links never appear',()=>{
+ const p=syntheticProfile(),s=demoReaders();s.demo=false;s.candidates[0].content='<img src=x onerror=alert(1)> </script><script>bad()</script>';s.candidates[0].url='javascript:alert(1)';p.readerDiscoveries=[s];
+ const {document}=renderReport(p,{mode:'live'}),grid=document.getElementById('reader-grid');assert.ok(grid.textContent.includes('<img src=x'));
+ const dangerous=[];grid.walk(el=>{if(['SCRIPT','IFRAME','IMG'].includes(el.tagName)||el.href?.startsWith('javascript:'))dangerous.push(el);});assert.equal(dangerous.length,0);
 });

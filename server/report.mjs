@@ -1,3 +1,4 @@
+import {readerView,demoReaders} from './readers.mjs';
 import {writePrivate} from './storage.mjs';
 import {dayKey,periodRange,duration,safeCover,safeLink} from './domain.mjs';
 import {readFileSync} from 'node:fs';
@@ -22,7 +23,7 @@ function bars(period,today,goal){
  return `<div class="chart-area"><div class="chart-guide"><span>${duration(max)}</span><span>0</span></div><div class="bar-row">${cells.join('')}</div></div>`;
 }
 
-export function buildReport(profile,{mode='live',generatedAt=new Date().toISOString()}={}){
+export function buildReport(profile,{mode='live',generatedAt=new Date().toISOString(),syncError=null}={}){
  const settings=profile.settings,snapshot=profile.snapshot,today=dayKey(new Date(),settings.timeZone);
  const weekly=snapshot?.weekly,monthly=snapshot?.monthly,validWeekly=weekly?.end===today,validMonthly=monthly?.end===today;
  const primary=snapshot?.books.find(b=>b.id===settings.primaryBookId)||snapshot?.books[0]||null;
@@ -33,9 +34,10 @@ export function buildReport(profile,{mode='live',generatedAt=new Date().toISOStr
  const demoCoverUri=pngDataUri(loadAsset('demo-book.png'));
  const heroImageUri=pngDataUri(loadAsset('reading-light.png'));
  const reportCover=cover=>cover==='/assets/demo-book.png'?(demoCoverUri||null):(safeCover(cover)||null);
- const data={mode,today,settings:{goal:settings.goal},primaryBookId:settings.primaryBookId,
+ const discoveries=profile.readerDiscoveries?.length?profile.readerDiscoveries:(mode==='demo'?[demoReaders()]:[]);
+ const data={readers:discoveries.map(s=>({id:s.id,title:s.title,query:s.query,fetchedAt:s.fetchedAt,coverage:s.coverage,demo:s.demo,views:Object.fromEntries(['popular','resonance','perspective'].map(v=>[v,readerView(s,v).map(c=>({...c,url:s.demo?null:safeLink(c.url)}))]))})),mode,today,settings:{goal:settings.goal},primaryBookId:settings.primaryBookId,
   books:(snapshot?.books||[]).map(b=>({id:b.id,title:b.title,author:b.author,cover:reportCover(b.cover),progress:b.progress,done:b.done,weeklySeconds:b.weeklySeconds,finishDate:b.finishDate,deepLink:safeLink(b.deepLink)})),
-  notes:(snapshot?.notes||[]).map(n=>({id:n.id,bookId:n.bookId,title:n.title,chapter:n.chapter,quote:n.quote,thought:n.thought,date:n.date,type:n.type,deepLink:safeLink(n.deepLink)})),
+  notes:(snapshot?.notes||[]).map(n=>({id:n.id,bookId:n.bookId,title:n.title,chapter:n.chapter,quote:n.quote,thought:n.thought,date:n.date,chapterUid:n.chapterUid,range:n.range,type:n.type,deepLink:safeLink(n.deepLink)})),
   weekly:weekly?{start:weekly.start,end:weekly.end,totalSeconds:weekly.totalSeconds,readDays:weekly.readDays,days:weekly.days,fetchedAt:weekly.fetchedAt,valid:validWeekly}:null,
   monthly:monthly?{start:monthly.start,end:monthly.end,totalSeconds:monthly.totalSeconds,readDays:monthly.readDays,days:monthly.days,fetchedAt:monthly.fetchedAt,valid:validMonthly}:null,
   cards:(profile.cards||[]).map(c=>({id:c.id,title:c.title,body:c.body,kind:c.kind,updatedAt:c.updatedAt}))};
@@ -113,6 +115,7 @@ select{border:1px solid var(--line);border-radius:8px;background:#fffdfa;padding
 .card-row{padding:16px 6px;border-bottom:1px solid var(--line)}
 .card-row h3{font-family:var(--serif);font-size:16px;font-weight:500}.card-row small{color:#95948e;font-size:11px;display:block;margin-top:6px}
 .card-body{font-family:var(--serif);font-size:13px;color:#6e6c65;margin-top:10px;white-space:pre-wrap;line-height:1.9;max-height:130px;overflow:hidden;overflow-wrap:anywhere}
+.reader-grid{display:grid;gap:16px;margin-top:18px}.reader-card{padding:24px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere}.reader-card h3{font-family:var(--serif);font-size:20px}.reader-card blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #d8c2a3;font-size:15px;line-height:1.9;white-space:pre-wrap}.reader-card .reader-reason{margin:14px 0 8px;font-size:14px;line-height:1.8}.reader-card a{display:inline-block;margin-top:16px;font-size:14px}.reader-entry{display:block;margin-top:12px;color:var(--amber);font-size:13px;border:1px solid #d6b894;border-radius:6px;padding:8px 12px}.request-box{margin-top:24px;padding:20px;background:#f3ede2;border-radius:8px}.request-box label{display:block;font-size:14px;margin-bottom:10px}.request-box textarea{font:inherit;width:100%;min-height:88px;resize:vertical;border:1px solid #d6cec0;border-radius:6px;background:#fffdf8;padding:12px;line-height:1.7}.request-box button{margin-top:8px;padding:9px 14px;background:var(--amber);color:white;border-radius:6px}.reader-toolbar select{max-width:100%}.reader-question{margin:12px 0;line-height:1.8;color:#805025}
 .empty{padding:50px 20px;text-align:center;color:#96958f;line-height:2}
 .notice{padding:12px 15px;background:#fff0df;color:#8c4c23;font-size:12px;margin:16px 0;border:1px solid #efd6b4;border-radius:8px;line-height:1.8}
 footer{margin-top:40px;border-top:1px solid var(--line);padding:20px 0;font-size:10px;color:#a09e97;letter-spacing:1px;line-height:2}
@@ -129,11 +132,13 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding:20px 0;font-size
 <button data-tab="today" class="active">今日阅读</button>
 <button data-tab="shelf">我的书架</button>
 <button data-tab="notes">笔记回顾</button>
+<button data-tab="readers">发现读友</button>
 <button data-tab="review">阅读复盘</button>
 </nav>
 <p class="foot">个人数据保存在用户本机<br>此报告为只读快照，不含任何凭证</p>
 </aside>
 <main>
+<div class="notice" role="status">${mode==='demo'?'这是独立的示例工作台，展示虚构书籍和笔记。':`数据更新于 ${esc(snapshot?.syncedAt||'尚未同步')}。${snapshot?.weekly?.end!==today?'阅读统计需要刷新。':''}`} 页面为只读快照；需要最新内容时，让读书搭子“更新我的阅读工作台”。${syncError?'<br>本次更新未完成，显示已有快照：'+esc(syncError):''}${(snapshot?.books||[]).some(b=>b.notesSync?.complete===false)?'<br>部分书籍笔记仍在补齐中，已保留历史缓存。':''}${(snapshot?.warnings||[]).length?'<br>'+snapshot.warnings.map(esc).join('；'):''}</div>
 <section class="page active" id="page-today">
 <div class="intro"><h1>今天，给自己留一段专注时间</h1><p>${esc(today)} · ${mode==='demo'?'示例数据':'个人数据'} · 每日目标 ${esc(settings.goal)} 分钟</p></div>
 ${primary?`<div class="hero">${heroImageUri?`<img class="hero-background" src="${heroImageUri}" alt="" aria-hidden="true" referrerpolicy="no-referrer">`:''}<div class="hero-book">${reportCover(primary.cover)?`<img class="cover" src="${esc(reportCover(primary.cover))}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-ph',textContent:'封面暂不可用'}))">`:`<div class="cover-ph">封面暂不可用</div>`}</div>
@@ -159,6 +164,16 @@ ${primary?`<div class="hero">${heroImageUri?`<img class="hero-background" src="$
 <div class="note-list" id="notes-list"></div>
 <button class="load-more" id="notes-more" hidden>再看 50 条</button>
 <div class="panel"><h2>已保存的读书卡片</h2><div id="cards-list"></div></div>
+</section>
+<section class="page" id="page-readers">
+<div class="intro"><h1>谁也在认真读这里</h1><p>从一段有共鸣的想法，发现值得继续了解的人。</p></div>
+<div class="toolbar reader-toolbar"><select id="reader-session" aria-label="选择读友发现记录"></select></div>
+<p class="reader-question" id="reader-question"></p>
+<div class="tabs" id="reader-tabs"><button data-reader-view="popular" class="active">高赞想法</button><button data-reader-view="resonance">同频观点</button><button data-reader-view="perspective">不同视角</button></div>
+<p class="count-caption" id="reader-coverage"></p>
+<div class="reader-grid" id="reader-grid"></div>
+<div class="request-box"><label for="reader-request">继续发现 · 把这句话发给读书搭子</label><textarea id="reader-request" readonly></textarea><button id="reader-copy">复制请求</button><p class="muted small" id="reader-copy-status" role="status">在对话中查找后，重新生成工作台即可看到结果。</p></div>
+<p class="muted small" style="margin-top:20px">高赞来自本次取得的公开内容。推荐理由关注具体观点，不代表对作者本人的评价。点击“查看原始想法”在微信读书中继续了解对方。</p>
 </section>
 <section class="page" id="page-review">
 <div class="intro"><h1>每一页，都算数</h1><p>只呈现已核对的完成日期与已载入笔记，缺口保持空白。</p></div>
@@ -189,7 +204,7 @@ function safeCoverUrl(u){if(typeof u!=='string'||!u)return null;if(u.indexOf('da
  return h==='qpic.cn'||h==='qq.com'||h==='qlogo.cn'||h.indexOf('.qpic.cn')===h.length-8||h.indexOf('.qq.com')===h.length-7||h.indexOf('.qlogo.cn')===h.length-9?u:null;}
 function safeLinkUrl(u){if(typeof u!=='string'||!u)return null;var x;try{x=new URL(u);}catch(e){return null;}
  return x.protocol==='weread:'||(x.protocol==='https:'&&(x.hostname==='weread.qq.com'||x.hostname.indexOf('.weread.qq.com')===x.hostname.length-13))?u:null;}
-function coverNode(book){var u=safeCoverUrl(book.cover);if(!u)return el('div','cover-ph','封面暂不可用');var img=el('img');img.className='cover';img.referrerPolicy='no-referrer';img.alt='';img.src=u;img.onerror=function(){img.replaceWith(el('div','cover-ph','封面暂不可用'));};return img;}
+function coverNode(book){var u=safeCoverUrl(book.cover);if(!u)return el('div','cover-ph','封面暂不可用');var img=el('img');img.className='cover';img.referrerPolicy='no-referrer';img.loading='lazy';img.decoding='async';img.alt='';img.src=u;img.onerror=function(){img.replaceWith(el('div','cover-ph','封面暂不可用'));};return img;}
 function barChart(node,period,goal){node.textContent='';if(!period){node.appendChild(el('p','muted','本周期统计数据尚未同步。'));return;}
  var days=period.days||{},max=Math.max(goal*60,1),k;for(k in days)if(days[k]>max)max=days[k];
  var area=el('div','chart-area'),guide=el('div','chart-guide');guide.appendChild(el('span','',fmtSec(max)));guide.appendChild(el('span','','0'));area.appendChild(guide);
@@ -201,7 +216,8 @@ function barChart(node,period,goal){node.textContent='';if(!period){node.appendC
  area.appendChild(row);node.appendChild(area);}
 // 主导航
 var navButtons=document.querySelectorAll('[data-tab]');
-navButtons.forEach(function(b){b.addEventListener('click',function(){navButtons.forEach(function(x){x.classList.toggle('active',x===b);});document.querySelectorAll('.page').forEach(function(p){p.classList.toggle('active',p.id==='page-'+b.dataset.tab);});});});
+function switchPage(tab){navButtons.forEach(function(x){x.classList.toggle('active',x.dataset.tab===tab);});document.querySelectorAll('.page').forEach(function(p){p.classList.toggle('active',p.id==='page-'+tab);});}
+navButtons.forEach(function(b){b.addEventListener('click',function(){switchPage(b.dataset.tab);});});
 // 今日
 var pb=D.books.find(function(b){return b.id===D.primaryBookId;})||D.books[0];
 if(pb){var at=document.querySelector('.author[data-book-title]');if(at)at.textContent=pb.title+(pb.author?' · '+pb.author:'');
@@ -224,7 +240,7 @@ function renderShelf(){var grid=$('shelf-grid');grid.textContent='';var list=D.b
  var link=safeLinkUrl(b.deepLink);if(link)btn.addEventListener('click',function(){window.open(link,'_blank','noopener');});else btn.disabled=true;card.appendChild(btn);
  card.appendChild(el('h3','',b.title));card.appendChild(el('p','',b.author||'作者待同步'));
  card.appendChild(el('p','small',(b.done?'已读完':b.progress===null?'进度待同步':'已读 '+b.progress+'%')+(b.weeklySeconds!=null?' · 本周 '+fmtSec(b.weeklySeconds):'')));
- if(b.id===D.primaryBookId)card.appendChild(el('span','tag','主读中'));grid.appendChild(card);});
+ if(b.id===D.primaryBookId)card.appendChild(el('span','tag','主读中'));var discover=el('button','reader-entry','找这本书的读友');discover.addEventListener('click',function(){openReaders(b);});card.appendChild(discover);grid.appendChild(card);});
  if(!list.length)grid.appendChild(el('p','empty','没有找到符合条件的书籍。'));
  $('shelf-more').hidden=list.length<=shelfLimit;}
 document.querySelectorAll('[data-shelf]').forEach(function(b){b.addEventListener('click',function(){shelfFilter=b.dataset.shelf;shelfLimit=60;document.querySelectorAll('[data-shelf]').forEach(function(x){x.classList.toggle('active',x===b);});renderShelf();});});
@@ -245,7 +261,7 @@ function renderNotes(){var list=$('notes-list');list.textContent='';var all=D.no
   if(n.thought)row.appendChild(el('p',n.quote?'note-thought':'note-quote',n.quote?'我的想法：'+n.thought:n.thought));
   if(!n.quote&&!n.thought)row.appendChild(el('p','note-quote','（这条笔记没有文字内容）'));
   var meta='《'+n.title+'》'+(n.chapter?' · '+n.chapter:'')+' · '+(n.type==='thought'?'想法':'划线')+' · '+(n.date||'日期待同步');
-  var link=safeLinkUrl(n.deepLink);var mp=el('p','note-meta',meta);if(link){var a=el('a','',link);a.href=link;a.target='_blank';a.rel='noopener';mp.textContent='';mp.appendChild(document.createTextNode(meta+' · '));mp.appendChild(a);}row.appendChild(mp);list.appendChild(row);});
+  var link=safeLinkUrl(n.deepLink);var mp=el('p','note-meta',meta);if(link){var a=el('a','',link);a.href=link;a.target='_blank';a.rel='noopener';mp.textContent='';mp.appendChild(document.createTextNode(meta+' · '));mp.appendChild(a);}row.appendChild(mp);var discover=el('button','reader-entry','谁也在认真读这里');discover.addEventListener('click',function(){openReaders({id:n.bookId,title:n.title},n);});row.appendChild(discover);list.appendChild(row);});
  if(!all.length)list.appendChild(el('p','empty','当前条件下没有已载入的笔记。'));
  $('notes-more').hidden=all.length<=noteLimit;}
 $('notes-search').addEventListener('input',function(e){noteQuery=e.target.value.trim().toLowerCase();noteLimit=50;renderNotes();});
@@ -255,6 +271,49 @@ renderNotes();
 (function(){var box=$('cards-list');var cards=D.cards.filter(function(c){return c.kind==='card';});
  if(!cards.length){box.appendChild(el('p','muted','还没有保存读书卡片。可以在 WorkBuddy 中让读书搭子根据选中的笔记整理草稿，确认后再保存。'));return;}
  cards.forEach(function(c){var row=el('div','card-row');row.appendChild(el('h3','',c.title));row.appendChild(el('small','','更新于 '+c.updatedAt));row.appendChild(el('p','card-body',c.body));box.appendChild(row);});})();
+// 发现读友：数据在生成时写入，页面不调用接口、不建立账户或关系网络。
+var readerViewName='popular',readerTarget=null;
+var readerSelect=$('reader-session');
+var readerPlaceholder=el('option','','选择一次发现，或从书架 / 笔记开始');readerPlaceholder.value='';readerSelect.appendChild(readerPlaceholder);
+D.readers.forEach(function(s){var o=el('option','',s.title+(s.query.range?' · 一段原文':' · 全书讨论')+(s.query.question?' · '+s.query.question:''));o.value=s.id;readerSelect.appendChild(o);});
+readerSelect.value=D.readers.length?D.readers[0].id:'';
+function openReaders(book,note){
+ readerTarget={book:book,note:note};
+ var match=D.readers.find(function(s){return s.query.bookId===book.id&&(note?!!note.range&&s.query.range===note.range&&s.query.chapterUid===note.chapterUid:!s.query.range);});
+ readerSelect.value=match?match.id:'';readerViewName='popular';switchPage('readers');renderReaders();
+}
+function renderReaders(){
+ var s=D.readers.find(function(s){return s.id===readerSelect.value;});
+ var box=$('reader-grid');box.textContent='';
+ document.querySelectorAll('[data-reader-view]').forEach(function(b){b.classList.toggle('active',b.dataset.readerView===readerViewName);});
+ $('reader-question').textContent=s?(s.query.question?'你关心的是：'+s.query.question:'从具体观点开始，慢慢了解一个人。'):(readerTarget?'《'+readerTarget.book.title+'》'+(readerTarget.note?' · 选定原文':''):'先选一本书，或一句让你停下来的话。');
+ $('reader-coverage').textContent=s?(s.demo?'虚构示例 · ': '')+'采样于 '+new Date(s.fetchedAt).toLocaleString('zh-CN')+' · 已取得 '+s.coverage.sampled+' 条公开内容，其中 '+s.coverage.missingLikes+' 条未返回点赞数 · '+(s.query.range?'选定段落的讨论':'部分热门段落与书评')+'，不代表全书排行榜。'+s.coverage.warnings.join('；'):'';
+ var rows=s?s.views[readerViewName]:[];
+ rows.forEach(function(c){
+  var card=el('article','reader-card');card.appendChild(el('h3','',c.name));
+  card.appendChild(el('p','note-meta',(c.likes===null?'点赞数未提供':c.likes+' 个赞')+(c.date?' · '+c.date:'')+' · '+(c.source==='review'?'公开书评':'段落想法')));
+  if(c.quote)card.appendChild(el('p','muted small','原文片段：'+c.quote));
+  card.appendChild(el('blockquote','',c.content.slice(0,300)+(c.content.length>300||c.truncated?'…':'')));
+  card.appendChild(el('p','reader-reason',(c.origin==='ai'?'值得读的理由 · AI 建议：':'发现线索：')+c.reason));
+  card.appendChild(el('p','muted small',(c.origin==='ai'?'与你的关联 · AI 建议：':'与你的关联：')+c.connection));
+  if(c.evidence)card.appendChild(el('p','note-meta','判断依据：「'+c.evidence+'」'));
+  var link=s.demo?null:safeLinkUrl(c.url);if(link){var a=el('a','','查看原始想法 ↗');a.href=link;a.target='_blank';a.rel='noopener noreferrer';card.appendChild(a);}else card.appendChild(el('p','note-meta',s.demo?'虚构示例，不关联真实账号':'暂未取得可用的原文链接'));
+  box.appendChild(card);
+ });
+ if(!rows.length)box.appendChild(el('p','empty',!s?'这里还没有读友发现记录。可以从下面这句话开始。':readerViewName==='popular'?'本次没有取得可用于高赞排序的内容；可以让专家阅读候选想法，看看是否有值得讨论的观点。':readerViewName==='resonance'&&!s.query.question?'先告诉读书搭子你关心的问题，再寻找相关的观点。':'这个视角还没有整理好的推荐。有依据的读友不足时，保持留白。'));
+ var book=s?{id:s.query.bookId,title:s.title}:readerTarget?.book;
+ var q='帮我找'+(book?'《'+book.title+'》':'一本我正在读的书')+'里值得继续了解的读友';
+ var note=readerTarget?.note;
+ if(note&&!s)q='帮我找《'+book.title+'》这段话下值得继续了解的读友：「'+(note.quote||note.thought).slice(0,240)+'」'+(note.range&&note.chapterUid!==undefined?'（章节 '+note.chapterUid+'，原文范围 '+note.range+'）':'。请先核对能否定位这段原文，找不到时不要替换为其他段落');
+ else if(s?.query.range)q='帮我继续找《'+s.title+'》同一段原文下的读友（章节 '+s.query.chapterUid+'，原文范围 '+s.query.range+'）';
+ q+='。'+(s?.query.question?'我关心的是：'+s.query.question+'。':'请先问我关心的问题。')+'请分别整理高赞想法、同频观点和不同视角，说明理由，保留原始想法链接，并更新本地工作台。';
+ $('reader-request').value=q;
+ $('reader-copy-status').textContent='在对话中查找后，重新生成工作台即可看到结果。';
+}
+readerSelect.addEventListener('change',function(){readerTarget=null;renderReaders();});
+document.querySelectorAll('[data-reader-view]').forEach(function(b){b.addEventListener('click',function(){readerViewName=b.dataset.readerView;renderReaders();});});
+$('reader-copy').addEventListener('click',async function(){try{await navigator.clipboard.writeText($('reader-request').value);$('reader-copy-status').textContent='已复制，请粘贴到与读书搭子的对话中。';}catch(e){$('reader-request').focus();$('reader-request').select();$('reader-copy-status').textContent='文字已选中，请复制后粘贴到对话中。';}});
+renderReaders();
 // 复盘
 var period='weekly';
 function renderReview(){var p=D[period];var valid=p&&p.valid;

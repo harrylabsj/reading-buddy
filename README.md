@@ -38,7 +38,7 @@ npm start
 
 ## 专家发布候选包（当前主路径）
 
-当前状态：专家 v0.3.0 已于 2026-09-14 提交 WorkBuddy 开放平台审核，ID 为 `oe_cab59592a0d1949b`，状态“审核中”。职称“读书搭子”、花名“海纳·读书专家”，作者联系邮箱 `1711496337@qq.com`。尚未确认审核通过或公开上架，详见 `workbuddy/PUBLISHING.md`。
+当前公开版本为 v0.4.2（2026-10-04 已在平台确认，专家 ID `oe_cab59592a0d1949b`）。更新版 v0.5.0 已于 2026-10-04 提交审核，保留第二个快捷提问“帮我生成本地阅读工作台”，优化按需同步、选定笔记复盘、断点恢复与工作台引导；状态与包校验信息见 `workbuddy/PUBLISHING.md`。
 
 专家是用户在 WorkBuddy 中发现和召唤「读书搭子」的入口，内置 Skill 执行本地授权、同步、笔记整理、卡片保存和报告生成。它不依赖 Buddy 应用 OAuth、不声明 MCP 或连接器依赖。
 
@@ -48,7 +48,11 @@ npm run package:expert
 npm run test:expert
 ```
 
-发布候选包生成在 `dist/expert/reading-buddy-expert-0.3.0.zip`。它包含专家元数据、头像、Agent 定义和完整本地 Skill，不包含用户数据、微信读书凭证、MCP 服务或连接器包。提交专家审核前，仍需在 WorkBuddy 客户端导入该 ZIP 并走通首次授权、同步和本地报告生成。
+发布候选包生成在 `dist/expert/reading-buddy-expert-0.5.0.zip`。它包含专家元数据、头像、Agent 定义和完整本地 Skill，不包含用户数据、微信读书凭证、MCP 服务或连接器包。三个胶囊顺序与文案沿用 v0.4.2；本轮使用虚构数据验证，未执行真实书架同步。
+
+v0.5.0 默认基础同步仅取书架、周/月统计和笔记目录（四个基础请求），书籍详情和正文按需补齐。笔记同步未完成时合并保留旧缓存并保存断点；完整一轮后才核对删除。`review` 默认只返回统计和目录，用户选定 `--note-ids` 后才返回正文摘要；正文有长度预算且不修改本机原文。
+
+`doctor` 用于离线环境与数据状态检查；`workspace --open` 从缓存生成并打开账户独立工作台，用户要求更新时用 `workspace --sync --open`。跨进程同步锁和持久化限流期限避免重复请求；换 Key 后可通过历史目录、导出及显式备份导入恢复，原数据保留。
 
 用户可在专家市场召唤读书搭子，也可从灵感案例「做同款」生成自己的阅读工作台。灵感案例只能使用虚构数据；不能上传用户报告、书架、笔记或备份。
 
@@ -125,3 +129,7 @@ npm run build
 - [WorkBuddy Buddy 应用](https://open.workbuddy.cn/docs/buddy-app)
 - [WorkBuddy 连接器](https://open.workbuddy.cn/docs/connector)
 - [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview)
+
+### v0.6.0：谁也在认真读这里
+
+专家/Skill 新增本地读友发现；对话可说“帮我找《某本书》里值得继续了解的读友，我关心……”或“谁也在认真读这段话”。工作台书架、笔记均有入口，新页呈现高赞想法、同频观点和不同视角。推荐依照实际公开内容、样本点赞及问题关联，每项保留原始想法与依据。使用说明见 `skills/reading-buddy/references/readers.md`。本次是专家/Skill 功能，既有连接器界面保持原工作流。
