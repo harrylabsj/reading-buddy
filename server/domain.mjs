@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { bookmarkEntrySchema } from './bookmarks.mjs';
 import {readerSessionSchema} from './readers-schema.mjs';
 
 export const dayKey = (date = new Date(), zone = 'Asia/Shanghai') => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
@@ -50,8 +51,8 @@ export const settingsSchema = z.object({ goal: z.number().int().min(5).max(600),
 export const cardSchema = z.object({ id: z.string().min(1).max(100), title: z.string().min(1).max(200), body: z.string().min(1).max(100000), createdAt: iso, updatedAt: iso, kind: z.enum(['card', 'weekly', 'monthly']), noteIds: z.array(z.string().max(200)).max(100), origin: z.enum(['local', 'workbuddy']) });
 export const profileSchema = z.object({ schema: z.literal(1), mode: z.enum(['live', 'demo']), settings: settingsSchema,
   snapshot: z.object({ syncedAt: iso, syncScope:z.enum(['basic','full']).optional(), books: z.array(bookSchema).max(20000), notes: z.array(noteSchema).max(100000), weekly: periodSchema, monthly: periodSchema, totals: z.object({ notebookBooks: nullableNumber, notes: nullableNumber, ebooks: nullableNumber, albums: nullableNumber, articles: nullableNumber }), warnings: z.array(z.string().max(500)).max(30) }).nullable(),
-  readerDiscoveries:z.array(readerSessionSchema).max(10).default([]), cards: z.array(cardSchema).max(10000), reflections: z.array(z.object({ noteId: z.string().max(200), text: z.string().max(10000), updatedAt: iso })).max(50000) });
-export function newProfile(mode = 'live') { return { schema: 1, mode, settings: { goal: 30, timeZone: 'Asia/Shanghai', primaryBookId: null }, snapshot: null, readerDiscoveries:[], cards: [], reflections: [] }; }
+  bookmarkEntries:z.array(bookmarkEntrySchema).max(10000).default([]), readerDiscoveries:z.array(readerSessionSchema).max(10).default([]), cards: z.array(cardSchema).max(10000), reflections: z.array(z.object({ noteId: z.string().max(200), text: z.string().max(10000), updatedAt: iso })).max(50000) });
+export function newProfile(mode = 'live') { return { schema: 1, mode, settings: { goal: 30, timeZone: 'Asia/Shanghai', primaryBookId: null }, snapshot: null, bookmarkEntries:[], readerDiscoveries:[], cards: [], reflections: [] }; }
 export function validateBackup(raw, expectedMode) {
   const parsed = profileSchema.parse(raw);
   if (parsed.mode !== expectedMode) throw Object.assign(new Error('示例数据与个人数据不能混合导入，请切换对应模式。'),{status:400});
@@ -69,6 +70,7 @@ export function mergeBackup(current, incoming) {
     return [...map.values()];
   };
   return { ...current, snapshot: !current.snapshot || (incoming.snapshot && incoming.snapshot.syncedAt > current.snapshot.syncedAt) ? incoming.snapshot : current.snapshot,
+    bookmarkEntries:merge(current.bookmarkEntries||[],incoming.bookmarkEntries||[],'id','savedAt'),
     readerDiscoveries:merge(current.readerDiscoveries||[],incoming.readerDiscoveries||[],'id','fetchedAt').sort((a,b)=>b.fetchedAt.localeCompare(a.fetchedAt)).slice(0,10),
     cards: merge(current.cards, incoming.cards, 'id'), reflections: merge(current.reflections, incoming.reflections, 'noteId') };
 }

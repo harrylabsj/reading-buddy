@@ -2,6 +2,7 @@ import {mkdirSync,readFileSync,writeFileSync,renameSync,existsSync,chmodSync,ope
 import {resolve,join} from 'node:path';
 import {homedir} from 'node:os';
 import {createHash,randomBytes} from 'node:crypto';
+import {listBookmarks} from './bookmarks.mjs';
 import {newProfile,demoProfile,profileSchema,dayKey} from './domain.mjs';
 const managed=process.env.READING_AUTH_MODE==='workbuddy';
 const skillMode=process.env.READING_AUTH_MODE==='skill';
@@ -65,7 +66,7 @@ const requestStatePath=identity=>join(dataDir,`request-state-${identity}.json`);
 export function retryDeadline(identity=accountId()){try{const value=JSON.parse(readFileSync(requestStatePath(identity),'utf8')).retryAfter;return Number.isFinite(value)?value:0;}catch{return 0;}}
 export function persistRetryDeadline(deadline,identity=accountId()){const path=requestStatePath(identity);locked(path,()=>writeJson(path,{retryAfter:Math.max(retryDeadline(identity),deadline)}));}
 export function profileHistory(){return readdirSync(dataDir).filter(name=>/^profile-([a-f0-9]{20}|unconnected)\.json$/.test(name)).map(name=>{
- const identity=name.slice(8,-5);try{const p=profileSchema.parse(JSON.parse(readFileSync(join(dataDir,name),'utf8')));return {account:identity,current:identity===accountId(),cards:p.cards.length,reflections:p.reflections.length,syncedAt:p.snapshot?.syncedAt||null};}catch{return {account:identity,current:identity===accountId(),unreadable:true};}
+ const identity=name.slice(8,-5);try{const p=profileSchema.parse(JSON.parse(readFileSync(join(dataDir,name),'utf8')));return {account:identity,current:identity===accountId(),cards:p.cards.length,bookmarks:listBookmarks(p.bookmarkEntries).length,reflections:p.reflections.length,syncedAt:p.snapshot?.syncedAt||null};}catch{return {account:identity,current:identity===accountId(),unreadable:true};}
 }).filter(row=>!row.current);}
 export function historicalProfile(identity){if(!/^([a-f0-9]{20}|unconnected)$/.test(identity))throw Object.assign(Error('请选择 auth history 列出的历史账户标识。'),{status:400});const path=join(dataDir,`profile-${identity}.json`);if(!existsSync(path))throw Object.assign(Error('未找到指定历史数据。'),{status:404});try{return profileSchema.parse(JSON.parse(readFileSync(path,'utf8')));}catch{throw Object.assign(Error('历史数据文件无法读取或格式不完整，原文件未修改。'),{status:400});}}
 export function hasProfileHistory(){return readdirSync(dataDir).some(name=>/^profile-([a-f0-9]{20}|unconnected)\.json$/.test(name)&&name!==`profile-${accountId()}.json`);}

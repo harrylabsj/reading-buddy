@@ -2,6 +2,9 @@ import {createHash} from 'node:crypto';
 import {getKey,readProfile,updateProfile,accountId,acquireSyncLease,retryDeadline,persistRetryDeadline} from './storage.mjs';
 import {normalizePeriod,normalizeShelf,finite,safeLink,safeCover,dayKey} from './domain.mjs';
 const gateway='https://i.weread.qq.com/api/agent/gateway';
+// 与经核实的微信读书官方 weread-skills 版本对应；升级时需同时核对接口规范。
+export const WEREAD_SKILL_VERSION='1.0.5';
+const officialSkillUrl='https://cdn.weread.qq.com/skills/weread-skills.zip';
 let active=0,queue=[],syncPromise=null;
 const CACHE_AGE=15*60*1000;
 export const syncStatus={running:false,stage:'',error:null,errorStatus:null,startedAt:null,skipped:false};
@@ -16,12 +19,16 @@ export async function gatewayCall(apiName,params={},credential=getKey()){
  checkBackoff();await slot();
  try{
   checkBackoff();
-  const res=await fetch(gateway,{method:'POST',headers:{Authorization:`Bearer ${credential}`,'Content-Type':'application/json'},body:JSON.stringify({api_name:apiName,skill_version:'1.0.4',...params}),signal:AbortSignal.timeout(15000)});
+  const res=await fetch(gateway,{method:'POST',headers:{Authorization:`Bearer ${credential}`,'Content-Type':'application/json'},body:JSON.stringify({...params,api_name:apiName,skill_version:WEREAD_SKILL_VERSION}),signal:AbortSignal.timeout(15000)});
   if(res.status===429){const raw=res.headers?.get?.('retry-after');const seconds=raw?Number(raw):NaN;const parsed=raw?Date.parse(raw):NaN;const wait=Number.isFinite(seconds)?seconds*1000:Number.isFinite(parsed)?parsed-Date.now():60000;const deadline=Date.now()+Math.max(1000,Math.min(wait,3600000));persistRetryDeadline(deadline,identity);throw Object.assign(new ReaderError('微信读书请求较多，请在 retryAt 之后重试；本机历史数据仍可使用。',429),{retryAt:new Date(deadline).toISOString()});}
   if(res.status===401||res.status===403)throw new ReaderError('微信读书授权失效，请重新导入本机凭证。',401);
   if(!res.ok)throw new ReaderError(`微信读书服务暂不可用（${res.status}），已保留历史记录。`,502);
   const d=await res.json();
-  if(d.upgrade_info)throw new ReaderError('微信读书接口要求升级技能版本，已暂停同步；请更新读书搭子专家或内置 Skill 后重试。',409);
+  if(d.upgrade_info){
+   const latest=typeof d.upgrade_info.latest_version==='string'&&/^\d+\.\d+\.\d+$/.test(d.upgrade_info.latest_version)?d.upgrade_info.latest_version:null;
+   const upgradeInfo={currentVersion:WEREAD_SKILL_VERSION,latestVersion:latest,officialSkillUrl};
+   throw Object.assign(new ReaderError(`微信读书要求升级技能，已暂停操作（当前 ${WEREAD_SKILL_VERSION}${latest?`，最新 ${latest}`:''}）。请通过专家发布方获取兼容更新后重试；暂勿更换 Key。官方技能包（供核对版本）：${officialSkillUrl}`,409),{upgradeInfo});
+  }
   if(d.errcode)throw new ReaderError(`微信读书未能完成请求（错误码 ${Number(d.errcode)||'未知'}）。`,502);
   return d;
  }catch(e){if(e instanceof ReaderError)throw e;throw new ReaderError('暂时无法连接微信读书，已保留上次成功数据。',502);}
@@ -90,7 +97,7 @@ export async function syncAll({scope='basic',force=true}={}){
  try{return await syncPromise;}finally{syncPromise=null;}
 }
 async function performSync(scope,force){
- Object.assign(syncStatus,{running:true,error:null,errorStatus:null,retryAt:null,skipped:false,stage:'正在同步阅读时长和书架',startedAt:new Date().toISOString()});
+ Object.assign(syncStatus,{running:true,error:null,errorStatus:null,upgradeInfo:null,retryAt:null,skipped:false,stage:'正在同步阅读时长和书架',startedAt:new Date().toISOString()});
  const identity=accountId(),credential=getKey();let unlock;
  try{
   if(!['basic','full'].includes(scope))throw new ReaderError('同步范围仅支持 basic 或 full。');
@@ -99,8 +106,8 @@ async function performSync(scope,force){
   if(!force&&fresh(initial.snapshot?.syncedAt)&&initial.snapshot?.weekly?.end===today&&initial.snapshot?.monthly?.end===today&&(scope==='basic'||initial.snapshot.syncScope==='full')&&!initial.snapshot.warnings.length){syncStatus.skipped=true;syncStatus.stage='本机数据仍在有效期内，使用已有快照';return;}
   const results=await Promise.allSettled([gatewayCall('/readdata/detail',{mode:'weekly'},credential),gatewayCall('/readdata/detail',{mode:'monthly'},credential),gatewayCall('/shelf/sync',{},credential),gatewayCall('/user/notebooks',{count:100},credential)]);
   if(identity!==accountId())throw new ReaderError('连接已更改，请重新同步。',409);
+  const upgrade=results.find(r=>r.status==='rejected'&&r.reason.upgradeInfo);if(upgrade)throw upgrade.reason;
   if(results.every(r=>r.status==='rejected'))throw results[0].reason;
-  const upgrade=results.find(r=>r.status==='rejected'&&r.reason.status===409);if(upgrade)throw upgrade.reason;
   const [weekly,monthly,shelf,nb]=results.map(r=>r.status==='fulfilled'?r.value:null);
   const labels=['本周统计','本月统计','书架','笔记概览'];const warnings=results.flatMap((r,i)=>r.status==='rejected'?[`${labels[i]}同步失败，保留旧记录。`]:[]);
   if(nb?.hasMore)warnings.push('笔记概览为最近100本，其余书籍可在书架中按需同步。');
@@ -116,12 +123,14 @@ async function performSync(scope,force){
    syncStatus.stage='正在按完整同步范围补齐详情和最近笔记';
    const p=readProfile(),ids=[...new Set([p.settings.primaryBookId,...p.snapshot.books.slice(0,11).map(b=>b.id)])].filter(Boolean);
    const detailResults=await Promise.allSettled(ids.map(id=>refreshBook(id,{force,leaseHeld:true})));
+   const detailUpgrade=detailResults.find(r=>r.status==='rejected'&&r.reason.upgradeInfo);if(detailUpgrade)throw detailUpgrade.reason;
    if(detailResults.some(r=>r.status==='rejected'))updateProfile('live',p=>p.snapshot.warnings=[...new Set([...p.snapshot.warnings,'部分封面或进度未更新，可以稍后重试。'])].slice(-30));
    const noteIds=(nb?.books||[]).slice(0,2).map(b=>String(b.bookId)).filter(id=>p.snapshot.books.some(b=>b.id===id));
    const noteResults=await Promise.allSettled(noteIds.map(id=>fetchBookNotes(id,{force,leaseHeld:true})));
+   const noteUpgrade=noteResults.find(r=>r.status==='rejected'&&r.reason.upgradeInfo);if(noteUpgrade)throw noteUpgrade.reason;
    if(noteResults.some(r=>r.status==='rejected'))updateProfile('live',p=>p.snapshot.warnings=[...new Set([...p.snapshot.warnings,'部分笔记未更新，请按书刷新。'])].slice(-30));
   }
   syncStatus.stage='同步完成';
- }catch(e){syncStatus.error=e.message;syncStatus.errorStatus=e?.status??null;syncStatus.retryAt=e.retryAt||null;syncStatus.stage='同步未完成';}
+ }catch(e){syncStatus.error=e.message;syncStatus.errorStatus=e?.status??null;syncStatus.upgradeInfo=e.upgradeInfo||null;syncStatus.retryAt=e.retryAt||null;syncStatus.stage='同步未完成';}
  finally{unlock?.();syncStatus.running=false;}
 }

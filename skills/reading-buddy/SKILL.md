@@ -1,10 +1,10 @@
 ---
 name: reading-buddy
 display_name: 读书搭子
-description: 在用户本机处理微信读书书架与统计、选定笔记、私人读书卡片和阅读工作台。用于查看个人阅读数据、生成本地工作台、整理已选笔记、恢复本机历史数据，以及按书或段落发现公开想法作者；用户只粘贴摘录或讨论阅读方法时可直接对话，无需授权。
-description_zh: 在用户本机处理微信读书书架与统计、选定笔记、私人读书卡片和阅读工作台；按需同步，免连接器，不依赖业务云端服务。
-description_en: Local WeRead shelves and stats, selected reading notes, private cards, reading workspaces, and explicit recovery of local history.
-version: 0.6.0
+description: 从读者选定的笔记中提炼书评论点并导出带出处的 Markdown，将同段公开想法与读者的判断对读，从手工摘录或选定笔记建立本地共读书签，恢复上次讨论并追加观点变化。在用户本机处理微信读书书架与统计、选定笔记、私人读书卡片和阅读工作台。用于查看个人阅读数据、生成本地工作台、整理已选笔记、恢复本机历史数据，以及按书或段落发现公开想法作者；用户只粘贴摘录或讨论阅读方法时可直接对话，无需授权。
+description_zh: 支持免授权摘录共读与观点续谈。在用户本机处理微信读书书架与统计、选定笔记、私人读书卡片和阅读工作台；按需同步，免连接器，不依赖业务云端服务。
+description_en: Resume book discussions from local bookmarks or pasted passages. Local WeRead shelves and stats, selected reading notes, private cards, reading workspaces, and explicit recovery of local history.
+version: 0.9.0
 author: 北京海纳福星文化传媒有限公司
 allowed-tools: Bash
 ---
@@ -17,15 +17,28 @@ allowed-tools: Bash
 
 - 已粘贴摘录或一般阅读讨论：直接完成对话任务，不要求微信读书授权。
 - 个人数据任务：先检查 `node --version`，再运行 `doctor`；它只返回环境、授权配置、快照和恢复提示，不联网，不返回笔记正文。本机配置存在不代表已联网核验授权。
-- 授权缺失：官方入口 https://weread.qq.com/r/weread-skills 。让用户用本机文本编辑器将 Key 保存为一个文件，然后 `auth import <用户指定文件>`；导入后可删除原文件。不要把 Key 粘贴到对话或命令参数中。环境变量 `WEREAD_API_KEY` 优先于凭证文件。
+- 需要联网访问个人微信读书数据且授权缺失：官方入口 https://weread.qq.com/r/weread-skills 。让用户用本机文本编辑器将 Key 保存为一个文件，然后 `auth import <用户指定文件>`；导入后可删除原文件。不要把 Key 粘贴到对话或命令参数中。环境变量 `WEREAD_API_KEY` 优先于凭证文件。
 - 同步须基于用户已提出的连接、同步、更新请求或明确授权。默认 `sync --scope basic` 只取书架、周/月统计和笔记目录；单本详情用 `book <id>`，单本正文用 `notes <id> --refresh`。仅用户要求完整同步时才用 `sync --scope full`。
+
+## 共读书签
+
+用户提供摘录时直接讨论。要存到本机或恢复上次讨论才需要脚本，无需先配置微信读书。使用 `bookmarks --query 书名` 只取目录，确定是哪一本后 `bookmark-resume <key>` 读取最近两次；需要更早记录才按 nextOffset 翻页。手工书与微信读书 ID 分开，同名版本须由读者选定。
+保存用 `bookmark-save --input <JSON文件>`。新书签 parent 为 null，续谈用恢复结果最新条目的 id。按读者已确认的内容填写 judgment，AI 的追问放在 nextQuestion。重试同一次保存使用原输入；遇到版本冲突先恢复，再由读者决定如何追加。字段和来源规则见 references/commands.md。更换凭证后通过 auth history 查看原空间，按既有流程显式恢复。
 
 ## 工作台
 
-- 从缓存生成并打开：`workspace --open`。个人数据不存在时明确返回配置/同步提示；示例体验用 `workspace --mode demo --open`，必须标明虚构数据。
+- 从缓存生成并打开：`workspace --open`。仅有手工书签也可生成工作台；尚无个人数据时可先贴一段摘录；示例体验用 `workspace --mode demo --open`，必须标明虚构数据。
 - 用户要求更新：`workspace --sync --open`。近期且当前周期有效的缓存会复用；用户要求立即刷新时用 `workspace --sync --force --open`。
 - 默认文件路径按账户隔离。可指定 `workspace <输出.html> --open`。脚本返回 `path`、`opened`、`syncedAt` 和同步警告；交付可点击路径并说明数据更新时间。`opened=false` 时仍可打开返回文件。
 - 工作台是只读快照；搜索、筛选和切换只影响显示。同步、保存后重新生成才能更新页面。示例资源全部内嵌；个人封面会从微信读书图片域名加载。
+
+## 把自己的笔记写成书评
+
+用户说“从我的笔记写书评”“这些想法里哪个值得写”时，使用 [书评写作流程](references/book-review.md)。圈定一本书的材料，提供附依据、可能反例及缺口的论点。先取得读者选择，再写成可读的正文。调用 `book-review` 核对引文并导出用户认可的 Markdown。
+
+## 同段对读
+
+用户要看同一段的不同读法时，先确定段落和读者自己的判断。对已选书签可恢复其判断。按 [同段对读流程](references/readers.md) 定位原文，用 `reading-compare` 核对证据。交付一个分歧、一个原始链接和一个追问。用户没有提供判断时先问，已提供时直接比较。用户只贴摘录且缺少公开来源时，也可应请求给一个明确标注为 AI 假设的读法。
 
 ## 发现读友
 

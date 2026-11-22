@@ -109,3 +109,69 @@ test('reader candidates are bounded and an account with only discoveries can gen
  const work=await cli(['workspace']);assert.equal(work.code,0,JSON.stringify(work.error));assert.equal(work.json.snapshotAvailable,false);
  const file=join(process.env.READING_DATA_DIR,'curate.json');writeFileSync(file,JSON.stringify({sessionId:listed.json.sessionId,fetchedAt:listed.json.fetchedAt,view:'perspective',picks:[]}));assert.equal((await cli(['readers-curate','--input',file])).code,0);
 });
+
+test('same-passage comparison checks both quotes, accepts an unranked voice and leaves the decision to the reader', async () => {
+ fixture();
+ const quote = '时间从不匆忙，匆忙的是我们。';
+ const calls = passageMock([
+   thought(1,90,{abstract:quote,content:'好书，值得一读。'}),
+   thought(2,null,{abstract:quote,content:'匆忙的是心境。放慢速度也可能心不在焉。'})
+ ]);
+ const query = {bookId:'book',chapterUid:1,range:'10-20'};
+ const {session} = await readers.discoverReaders(query);
+ const file = join(process.env.READING_DATA_DIR,'comparison.json');
+ async function invoke(command,value) {
+   writeFileSync(file,JSON.stringify(value),{mode:0o600});
+   return cli([command,'--input',file]);
+ }
+ const input = {...query,sessionId:session.id,fetchedAt:session.fetchedAt,excerpt:quote,judgment:'我觉得作者劝人放慢速度。'};
+ const options = await invoke('reading-compare',input);
+ assert.equal(options.json.status,'choose');
+ assert.ok(options.json.candidates.some(c=>c.reviewId==='2_thought'));
+ assert.ok(options.json.candidates.every(c=>!Object.hasOwn(c,'likes')));
+ const pick = {reviewId:'2_thought',anchor:'匆忙',evidence:'匆忙的是心境',difference:'你读出速度，读友读出心境。',followUp:'哪几个字更能支持你的理解？'};
+ const comparison = {...input,pick};
+ const result = await invoke('reading-compare',comparison);
+ assert.equal(result.json.status,'compared');
+ assert.equal(result.json.url,'https://weread.qq.com/review-detail?reviewid=2_thought');
+ for(const invalid of [
+   {...comparison,bookId:'other'}, {...comparison,range:'11-19'}, {...comparison,chapterUid:2},
+   {...comparison,fetchedAt:'2001-01-01T00:00:00.000Z'},
+   {...comparison,pick:{...pick,anchor:'荒原'}}, {...comparison,pick:{...pick,evidence:'虚构的证据'}},
+   {...comparison,pick:{...pick,reviewId:'other'}}
+ ]) assert.notEqual((await invoke('reading-compare',invalid)).code,0);
+ assert.equal((await invoke('reading-compare',{...input,pick:null})).json.status,'no-match');
+ assert.equal(store.readProfile().bookmarkEntries.length,0);
+ const bookmark = {
+   bookId:'book',parent:null,excerpt:quote,question:'如何理解匆忙？',
+   judgment:'我仍然觉得作者说的是速度，但也注意到了心境。',nextQuestion:pick.followUp,comparison
+ };
+ assert.notEqual((await invoke('bookmark-save',{...bookmark,excerpt:'无关的段落'})).code,0);
+ const saved = await invoke('bookmark-save',bookmark);
+ assert.equal(saved.code,0,JSON.stringify(saved.error));
+ const backup = domain.validateBackup(store.readProfile(),'live');
+ store.updateProfile('live',p=>{p.readerDiscoveries=[];});
+ assert.equal((await invoke('bookmark-save',bookmark)).json.id,saved.json.id);
+ const resumed = (await cli(['bookmark-resume',saved.json.key])).json.entries[0];
+ assert.equal(resumed.judgment,bookmark.judgment);
+ assert.equal(resumed.comparison.judgment,input.judgment);
+ assert.equal(resumed.comparison.evidence,pick.evidence);
+ const html = readFileSync((await cli(['workspace'])).json.path,'utf8');
+ assert.ok(html.includes(result.json.url) && html.includes(pick.difference));
+ assert.deepEqual(domain.mergeBackup(domain.newProfile(),backup).bookmarkEntries[0],resumed);
+ assert.equal(calls.length,2); // Only discovery went online.
+ assert.ok(calls.every(c=>!JSON.stringify(c).includes(input.judgment)));
+});
+
+test('empty passage sample returns no match; whole-book samples cannot stand in for a passage', async () => {
+ fixture();
+ passageMock([]);
+ const query = {bookId:'book',chapterUid:1,range:'10-20'};
+ const {session} = await readers.discoverReaders(query);
+ const file = join(process.env.READING_DATA_DIR,'empty-comparison.json');
+ const input = {...query,sessionId:session.id,fetchedAt:session.fetchedAt,excerpt:'一段原文',judgment:'想法'};
+ writeFileSync(file,JSON.stringify(input));
+ assert.equal((await cli(['reading-compare','--input',file])).json.status,'no-match');
+ store.updateProfile('live',p=>{p.readerDiscoveries[0].coverage.scope='book-sample';});
+ assert.equal((await cli(['reading-compare','--input',file])).code,2);
+});

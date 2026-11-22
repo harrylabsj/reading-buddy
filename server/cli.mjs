@@ -9,9 +9,13 @@ process.env.READING_AUTH_MODE='skill';
 import {fileURLToPath} from 'node:url';
 import {realpathSync,existsSync} from 'node:fs';
 import {basename,dirname,join,resolve} from 'node:path';
-import {mkdirSync,readFileSync} from 'node:fs';
+import {linkSync,lstatSync,mkdirSync,readFileSync,rmSync} from 'node:fs';
 import {z} from 'zod';
 import {spawn} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {buildBookReview} from './book-review.mjs';
+import { compareReading } from './reading-comparison.mjs';
+import { appendBookmark, bookmarkHistory, listBookmarks } from './bookmarks.mjs';
 import {noteCatalog,noteExcerpts} from './selection.mjs';
 
 const storage=await import('./storage.mjs');
@@ -24,7 +28,7 @@ const {getState,action}=service;
 const {syncAll,syncStatus,fetchBookNotes,refreshBook}=weread;
 const {buildReport}=reportMod;
 
-const VERSION='0.6.0-skill';
+const VERSION='0.9.0-skill';
 const USAGE=`读书搭子 Skill 命令（stdout 始终输出 JSON；错误以 JSON 写入 stderr）
 用法: reading-buddy <命令> [选项] [--mode live|demo]
 
@@ -43,6 +47,7 @@ const USAGE=`读书搭子 Skill 命令（stdout 始终输出 JSON；错误以 JS
                                         发现公开想法作者；默认复用 15 分钟缓存
   readers-list [--session id] [--view popular|resonance|perspective] [--offset n]
                                         本地发现与最多 20 条候选摘录（离线）
+  reading-compare --input <JSON文件> [--offset n]  在本机比对本段的读法和引文
   readers-curate --input <json文件>      保存有原文依据的 AI 推荐理由（仅本机）
   settings [set --goal n --timezone tz --primary-book id|null]
                                         查看或修改每日目标、时区、主读书
@@ -54,6 +59,10 @@ const USAGE=`读书搭子 Skill 命令（stdout 始终输出 JSON；错误以 JS
                                         默认仅统计和目录；指定 ID 才读取所选正文
   save-card --title t --body b|--body-file <文件> [--kind card|weekly|monthly] [--note-ids id,id] [--id 既有卡片]
                                         保存已确认的卡片或复盘（仅本机）
+  bookmarks [--query 书名] [--offset n]   查看书签目录，仅书名、标识和日期
+  book-review --input <JSON文件> [--output <书评.md>]  选材料、核对论点、预览或导出书评
+  bookmark-resume <key> [--offset n]     恢复指定书签，按新到旧取两次讨论
+  bookmark-save --input <json文件>       保存一次已确认的判断和依据，支持无授权摘录
   backup export|import <路径>           导出/校验并合并导入备份（0600 私有权限）
   report <输出.html> [--open]           从本机快照生成并可打开只读 HTML 阅读报告
   workspace [输出.html] [--sync] [--force] [--open]
@@ -81,12 +90,17 @@ const SPECS={
   highlights:{flags:['mode'],pos:[1,1]},
   readers:{flags:['mode','question','chapter-uid','range','refresh'],pos:[1,1]},
   'readers-list':{flags:['mode','session','view','offset'],pos:[0,0]},
+  'reading-compare':{flags:['mode','input','offset'],pos:[0,0]},
   'readers-curate':{flags:['mode','input'],pos:[0,0]},
   settings:{flags:['mode','goal','timezone','primary-book'],pos:[0,1]},
   reflect:{flags:['mode','note-id','text','text-file','input'],pos:[0,0]},
   draft:{flags:['mode','notes','reflection','reflection-file'],pos:[0,0]},
   review:{flags:['mode','period','note-ids'],pos:[0,0]},
   'save-card':{flags:['mode','title','body','body-file','kind','note-ids','id','input','origin'],pos:[0,0]},
+  bookmarks:{flags:['mode','query','offset'],pos:[0,0]},
+  'bookmark-resume':{flags:['mode','offset'],pos:[1,1]},
+  'book-review':{flags:['mode','input','output'],pos:[0,0]},
+  'bookmark-save':{flags:['mode','input'],pos:[0,0]},
   backup:{flags:['mode'],pos:[2,2]},
   report:{flags:['mode','open'],pos:[1,1]},
   workspace:{flags:['mode','sync','force','open'],pos:[0,1]},
@@ -162,8 +176,8 @@ export async function runCli(argv,io={}){
 
     if(cmd==='doctor'){
       const p=readProfile(mode),configured=mode==='demo'?true:!!getKey();
-      const state=mode==='demo'?'demo':p.snapshot?'ready':configured?'needs-sync':'needs-auth';
-      return send({ok:true,version:VERSION,nodeVersion:process.versions.node,nodeCompatible:Number(process.versions.node.split('.')[0])>=20,mode,state,configured,authorizationVerified:false,snapshotAvailable:!!p.snapshot,syncedAt:p.snapshot?.syncedAt||null,historyAvailable:mode==='live'&&hasProfileHistory(),retryAt:mode==='live'&&retryDeadline()>Date.now()?new Date(retryDeadline()).toISOString():null,keyUrl:'https://weread.qq.com/r/weread-skills',hint:state==='needs-auth'?'获取 Key 后通过本机文件导入；也可运行 workspace --mode demo 先体验。':state==='needs-sync'?'如用户已要求同步，运行 sync --scope basic。':'优先使用本机数据；只有用户要求刷新时才联网。'});
+      const state=mode==='demo'?'demo':p.snapshot?'ready':p.bookmarkEntries.length?'local-reading':configured?'needs-sync':'needs-auth';
+      return send({ok:true,version:VERSION,wereadSkillVersion:weread.WEREAD_SKILL_VERSION,nodeVersion:process.versions.node,nodeCompatible:Number(process.versions.node.split('.')[0])>=20,mode,state,configured,authorizationVerified:false,bookmarkCount:listBookmarks(p.bookmarkEntries).length,snapshotAvailable:!!p.snapshot,syncedAt:p.snapshot?.syncedAt||null,historyAvailable:mode==='live'&&hasProfileHistory(),retryAt:mode==='live'&&retryDeadline()>Date.now()?new Date(retryDeadline()).toISOString():null,keyUrl:'https://weread.qq.com/r/weread-skills',hint:state==='needs-auth'?'贴一段摘录即可开始共读。访问个人微信读书数据时再通过本机文件导入 Key。':state==='needs-sync'?'如用户已要求同步，运行 sync --scope basic。':'优先使用本机数据；只有用户要求刷新时才联网。'});
     }
     if(cmd==='status'){
       const state=getState(mode);
@@ -173,7 +187,7 @@ export async function runCli(argv,io={}){
       return send({ok:true,mode,today:state.today,auth,connection,
         sync:{running:state.sync.running,stage:state.sync.stage,error:state.sync.error},
         snapshot:state.snapshot?{syncedAt:state.snapshot.syncedAt,books:state.snapshot.books.length,notes:state.snapshot.notes.length,weekly:state.snapshot.weekly,monthly:state.snapshot.monthly,totals:state.snapshot.totals,warnings:state.snapshot.warnings}:null,
-        settings:state.settings,counts:{cards:state.cards.length,reflections:state.reflections.length}});
+        settings:state.settings,counts:{bookmarks:listBookmarks(state.bookmarkEntries).length,cards:state.cards.length,reflections:state.reflections.length}});
     }
     if(cmd==='sync'){
       if(mode==='demo')return send({ok:true,demo:true,note:'示例模式使用独立虚构数据，无需同步。'});
@@ -182,7 +196,7 @@ export async function runCli(argv,io={}){
       if(syncStatus.error){
         const st=syncStatus.errorStatus;
         const code=st===401||st===403?3:st===429?5:1;
-        return failOut(code,syncStatus.error,{stage:syncStatus.stage,retryAt:syncStatus.retryAt,warnings:readProfile(mode).snapshot?.warnings||[],hint:st===401||st===403?'凭证可能已撤销或过期，可用 auth status 查看状态、auth import 重新导入。':undefined});
+        return failOut(code,syncStatus.error,{stage:syncStatus.stage,retryAt:syncStatus.retryAt,upgradeInfo:syncStatus.upgradeInfo||undefined,warnings:readProfile(mode).snapshot?.warnings||[],hint:st===401||st===403?'凭证可能已撤销或过期，可用 auth status 查看状态、auth import 重新导入。':undefined});
       }
       const p=readProfile(mode);
       return send({ok:true,stage:syncStatus.stage,scope:args.scope||'basic',cached:syncStatus.skipped,syncedAt:p.snapshot?.syncedAt||null,warnings:p.snapshot?.warnings||[],totals:p.snapshot?.totals||null});
@@ -240,6 +254,11 @@ export async function runCli(argv,io={}){
         sessions:sessions.map(s=>({id:s.id,title:s.title,query:s.query,fetchedAt:s.fetchedAt})),view,readers:readersMod.readerView(session,view),
         candidates:sorted.slice(offset,offset+20).map(c=>({...c,content:c.content.slice(0,500),quote:c.quote.slice(0,100),truncated:c.truncated||c.content.length>500||c.quote.length>100})),nextOffset:offset+20<sorted.length?offset+20:null});
     }
+    if(cmd==='reading-compare'){
+      if(!args.input) return failOut(2,'请提供所读段落和读者的判断。');
+      const offset = intArg(args.offset,'offset',0,120) ?? 0;
+      return send({ok:true,...compareReading(readProfile(mode),readJsonInputArg(args.input),offset)});
+    }
     if(cmd==='readers-curate'){
       if(!args.input)return failOut(2,'请用 --input 提供推荐理由 JSON 文件。');
       const session=readersMod.curateReaders(readJsonInputArg(args.input),mode);
@@ -296,13 +315,53 @@ export async function runCli(argv,io={}){
       const card=await action('/api/cards',mode,{id:args.id?String(args.id):input.id,title:String(title),body:String(body),kind,noteIds:list(args['note-ids']).length?list(args['note-ids']):(input.noteIds||[]),origin});
       return send({ok:true,card});
     }
+    if(cmd==='book-review'){
+      if (!args.input) throw badArgs('请提供本次书评选定的材料。');
+      const result = buildBookReview(readProfile(mode),readJsonInputArg(args.input));
+      if (!args.output) return send({ok:true,...result});
+      if (result.stage !== 'draft') throw badArgs('选定论点并生成正文后才能导出。');
+      if (!/\.md$/i.test(args.output)) throw badArgs('书评文件名需要以 .md 结尾。');
+      const target = prepareOutput(ensureSafeOutput(args.output));
+      const temporary = join(dirname(target),'.reading-review-' + randomUUID());
+      try {
+        writePrivate(temporary,result.markdown);
+        try {
+          linkSync(temporary,target);
+        } catch (error) {
+          if (error.code !== 'EEXIST') throw error;
+          const existing = lstatSync(target);
+          if (!existing.isFile() || existing.size !== Buffer.byteLength(result.markdown) || readFileSync(target,'utf8') !== result.markdown)
+            throw badArgs('目标位置已有其他内容，请换一个 Markdown 文件名。');
+        }
+      } finally { rmSync(temporary,{force:true}); }
+      return send({ok:true,stage:'exported',path:target,title:result.title});
+    }
+    if(cmd==='bookmarks'){
+      const offset = intArg(args.offset,'offset',0,10000) ?? 0;
+      const query = String(args.query ?? '').trim().toLowerCase();
+      const books = listBookmarks(readProfile(mode).bookmarkEntries).filter(b => b.title.toLowerCase().includes(query));
+      const items = books.slice(offset, offset + 20).map(({key,title,savedAt}) => ({key,title,savedAt}));
+      return send({ok:true,books:items,nextOffset:offset+20<books.length?offset+20:null});
+    }
+    if(cmd==='bookmark-resume'){
+      const offset = intArg(args.offset,'offset',0,10000) ?? 0;
+      const history = bookmarkHistory(readProfile(mode).bookmarkEntries,rest[0]);
+      return send({ok:true,total:history.length,entries:history.slice(offset,offset+2),nextOffset:offset+2<history.length?offset+2:null});
+    }
+    if(cmd==='bookmark-save'){
+      if(!args.input) return failOut(2,'请用 --input 提供已确认的共读书签。');
+      const input = readJsonInputArg(args.input);
+      let saved;
+      storage.updateProfile(mode, profile => { saved = appendBookmark(profile,input); });
+      return send({ok:true,key:saved.key,id:saved.id,savedAt:saved.savedAt});
+    }
     if(cmd==='backup'){
       const sub=rest[0],file=rest[1];
       if(!sub||!['export','import'].includes(sub)||!file)return failOut(2,'用法：backup export|import <路径>。');
       if(sub==='export'){
         const p=readProfile(mode);
         const target=writePrivate(prepareOutput(ensureSafeOutput(file)),JSON.stringify(p,null,2));
-        return send({ok:true,path:target,mode,cards:p.cards.length,reflections:p.reflections.length,note:'备份仅含本机阅读数据，不含任何凭证。'});
+        return send({ok:true,path:target,mode,bookmarks:listBookmarks(p.bookmarkEntries).length,cards:p.cards.length,reflections:p.reflections.length,note:'备份仅含本机阅读数据，不含任何凭证。'});
       }
       let raw;try{raw=JSON.parse(readFileSync(resolve(file),'utf8'));}catch(e){return failOut(2,'备份文件无法读取或不是有效的 JSON。');}
       const r=await action('/api/import',mode,raw);
@@ -317,7 +376,7 @@ export async function runCli(argv,io={}){
         if(syncStatus.error&&!readProfile(mode).snapshot)return failOut(exitFor({status:syncStatus.errorStatus}),syncStatus.error,{retryAt:syncStatus.retryAt});
       }
       const p=readProfile(mode);
-      if(cmd==='workspace'&&mode==='live'&&!p.snapshot&&!p.cards.length&&!p.readerDiscoveries.length)return failOut(getKey()?1:3,'本机尚无个人阅读数据。',{hint:getKey()?'用户要求联网时加 --sync；也可用 --mode demo 体验。':'通过官方入口获取 Key 后从本机文件导入；也可用 --mode demo 体验。',keyUrl:'https://weread.qq.com/r/weread-skills'});
+      if(cmd==='workspace'&&mode==='live'&&!p.snapshot&&!p.cards.length&&!p.readerDiscoveries.length&&!p.bookmarkEntries.length)return failOut(getKey()?1:3,'本机尚无个人阅读数据。',{hint:getKey()?'用户要求联网时加 --sync；也可用 --mode demo 体验。':'可先贴一段摘录建立共读书签，或用 --mode demo 体验。需要同步个人书架时再导入 Key。',keyUrl:'https://weread.qq.com/r/weread-skills'});
       const target=writePrivate(prepareOutput(output),buildReport(p,{mode,syncError:cmd==='workspace'&&isTrue(args.sync)?syncStatus.error:null}));
       const opened=isTrue(args.open)?await (io.openFile||openLocalReport)(target):false;
       return send({ok:true,path:target,mode,opened,snapshotAvailable:!!p.snapshot,syncedAt:p.snapshot?.syncedAt||null,generatedAt:new Date().toISOString(),warnings:p.snapshot?.warnings||[],syncError:cmd==='workspace'&&isTrue(args.sync)?syncStatus.error:null,areas:['today','shelf','notes','readers','review'],note:'工作台为本机只读快照；更新时再次运行 workspace。未能自动打开时可用返回路径打开。'});
@@ -329,7 +388,7 @@ export async function runCli(argv,io={}){
       if(rest.length!==(sub==='export-history'?3:sub==='import'?2:1))return failOut(2,'用法：auth status|import <文件>|revoke|history|export-history <账户标识> <文件>。');
       if(sub==='status')return send({ok:true,...credentialInfo(),historyAvailable:hasProfileHistory(),authorizationVerified:false});
       if(sub==='history')return send({ok:true,profiles:profileHistory(),note:'只显示历史空间标识、数量和更新时间；选择前请确认数据属于本人。'});
-      if(sub==='export-history'){const p=historicalProfile(rest[1]),target=writePrivate(prepareOutput(ensureSafeOutput(rest[2])),JSON.stringify(p,null,2));return send({ok:true,path:target,cards:p.cards.length,reflections:p.reflections.length,note:'历史数据已导出，原文件保留。确认是本人同一账户的数据后，可用 backup import 显式恢复到当前空间。'});}
+      if(sub==='export-history'){const p=historicalProfile(rest[1]),target=writePrivate(prepareOutput(ensureSafeOutput(rest[2])),JSON.stringify(p,null,2));return send({ok:true,path:target,bookmarks:listBookmarks(p.bookmarkEntries).length,cards:p.cards.length,reflections:p.reflections.length,note:'历史数据已导出，原文件保留。确认是本人同一账户的数据后，可用 backup import 显式恢复到当前空间。'});}
       if(sub==='import'){
         const file=rest[1];
         try{importCredential(resolve(file));}catch(e){
@@ -347,7 +406,7 @@ export async function runCli(argv,io={}){
     }
     return failOut(2,'未知命令。请用 --help 查看支持的命令。');
   }catch(e){
-    return failOut(exitFor(e),e instanceof z.ZodError?'数据格式不正确，请检查输入。':(e.message||'操作未完成。'),{retryAt:e.retryAt});
+    return failOut(exitFor(e),e instanceof z.ZodError?'数据格式不正确，请检查输入。':(e.message||'操作未完成。'),{retryAt:e.retryAt,upgradeInfo:e.upgradeInfo});
   }
 }
 

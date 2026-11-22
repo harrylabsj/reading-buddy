@@ -1,3 +1,5 @@
+import {comparisonLink} from './reading-comparison.mjs';
+import {listBookmarks} from './bookmarks.mjs';
 import {readerView,demoReaders} from './readers.mjs';
 import {writePrivate} from './storage.mjs';
 import {dayKey,periodRange,duration,safeCover,safeLink} from './domain.mjs';
@@ -21,6 +23,34 @@ function bars(period,today,goal){
  for(let d=new Date(range.start+'T12:00:00Z'),end=new Date(today+'T12:00:00Z');d<=end;d=new Date(d.getTime()+86400000)){const key=d.toISOString().slice(0,10),v=days[key];
   cells.push(`<div class="bar-column${key===today?' is-today':''}" title="${key}${v!=null?' · '+duration(v):' · 暂不可用'}"><div class="bar-track">${v!=null?`<span class="bar" style="height:${Math.round(v/max*100)}%"></span>`:'<span class="bar unknown"></span>'}</div><small>${d.getUTCDate()}日</small></div>`);}
  return `<div class="chart-area"><div class="chart-guide"><span>${duration(max)}</span><span>0</span></div><div class="bar-row">${cells.join('')}</div></div>`;
+}
+
+function comparisonPanel(entry) {
+ const c = entry.comparison;
+ if (!c) return '<p class="note-meta">想看看另一种读法？在对话中说“帮我找对这段话有不同理解的读友”。</p>';
+ const url = comparisonLink(c);
+ const link = url ? ` · <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">查看原始想法</a>` : ' · 虚构示例';
+ return `<div class="card-row"><h3>同段对读</h3><p>我原先的判断：${esc(c.judgment)}</p>
+<p class="note-quote">${esc(c.name)}：“${esc(c.evidence)}”${link}</p>
+<p>怎样理解“${esc(c.anchor)}”（AI 分析）：${esc(c.difference)}</p>
+<p>读完再想：${esc(c.followUp)}</p></div>`;
+}
+
+function bookmarkPanel(profile) {
+ const books = listBookmarks(profile.bookmarkEntries ?? []);
+ if (!books.length) return '<section class="panel"><h2>共读书签</h2><p class="muted">在对话里贴一段摘录，留下你想下次接着聊的问题。</p></section>';
+ const rows = books.map(entry => {
+   const evidence = entry.source.kind === 'manual'
+     ? '手工摘录：' + entry.source.excerpt
+     : [entry.source.chapter, entry.source.quote && '划线：' + entry.source.quote,
+        entry.source.thought && '笔记想法：' + entry.source.thought,
+        entry.source.truncated && '此处仅保留节选'].filter(Boolean).join(' · ');
+   return `<details class="card-row"><summary>《${esc(entry.title)}》 · ${esc(entry.question)}</summary>
+<p class="note-quote">我的判断：${esc(entry.judgment)}</p><p class="muted">${esc(evidence)}</p>
+${comparisonPanel(entry)}
+<p>下次接着想：${esc(entry.nextQuestion)}</p><p class="note-meta">在对话中说“接着聊《${esc(entry.title)}》”，可回看之前的判断。</p></details>`;
+ });
+ return `<section class="panel"><h2>共读书签</h2>${rows.join('')}</section>`;
 }
 
 export function buildReport(profile,{mode='live',generatedAt=new Date().toISOString(),syncError=null}={}){
@@ -141,12 +171,13 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding:20px 0;font-size
 <div class="notice" role="status">${mode==='demo'?'这是独立的示例工作台，展示虚构书籍和笔记。':`数据更新于 ${esc(snapshot?.syncedAt||'尚未同步')}。${snapshot?.weekly?.end!==today?'阅读统计需要刷新。':''}`} 页面为只读快照；需要最新内容时，让读书搭子“更新我的阅读工作台”。${syncError?'<br>本次更新未完成，显示已有快照：'+esc(syncError):''}${(snapshot?.books||[]).some(b=>b.notesSync?.complete===false)?'<br>部分书籍笔记仍在补齐中，已保留历史缓存。':''}${(snapshot?.warnings||[]).length?'<br>'+snapshot.warnings.map(esc).join('；'):''}</div>
 <section class="page active" id="page-today">
 <div class="intro"><h1>今天，给自己留一段专注时间</h1><p>${esc(today)} · ${mode==='demo'?'示例数据':'个人数据'} · 每日目标 ${esc(settings.goal)} 分钟</p></div>
+${bookmarkPanel(profile)}
 ${primary?`<div class="hero">${heroImageUri?`<img class="hero-background" src="${heroImageUri}" alt="" aria-hidden="true" referrerpolicy="no-referrer">`:''}<div class="hero-book">${reportCover(primary.cover)?`<img class="cover" src="${esc(reportCover(primary.cover))}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-ph',textContent:'封面暂不可用'}))">`:`<div class="cover-ph">封面暂不可用</div>`}</div>
 <div class="hero-copy"><span class="eyebrow">TODAY'S READING</span><h2>${todayMins===null?`给自己 ${esc(settings.goal)} 分钟，慢慢进入一本书。`:gap?`再读 ${esc(gap)} 分钟，给今天一个留白。`:`今天的阅读，已经好好留下。`}</h2>
 <p class="author" data-book-title></p>
 <div class="progress-caption"><span>阅读进度</span><strong data-book-progress></strong></div>
 <div class="progress-track"><span data-book-bar style="width:0%"></span></div>
-<p class="muted small" style="margin-top:10px">${todayMins===null?'今日时长待同步':`今日已读 ${esc(todayMins)} 分钟`} · 每日目标 ${esc(settings.goal)} 分钟</p></div></div>`:`<div class="empty">尚无主读书。连接并同步后，这里会显示今天值得继续的那本。<br>可以让 WorkBuddy 同步微信读书数据。</div>`}
+<p class="muted small" style="margin-top:10px">${todayMins===null?'今日时长待同步':`今日已读 ${esc(todayMins)} 分钟`} · 每日目标 ${esc(settings.goal)} 分钟</p></div></div>`:profile.bookmarkEntries?.length?'':`<div class="empty">尚无主读书。连接并同步后，这里会显示今天值得继续的那本。<br>可以让 WorkBuddy 同步微信读书数据。</div>`}
 <div class="today-grid"><section><h2>本周阅读节奏</h2><p class="stat-strong">${validWeekly?esc(duration(weekly.totalSeconds)):'待同步'}</p><div id="today-chart"></div><p class="count-caption">${validWeekly?'统计更新于 '+esc(weekly.fetchedAt):'本周统计尚未同步'} · 每日达到 1 分钟计为有效阅读日</p></section>
 <section><h2>留住一个想法</h2><div id="today-note"></div></section></div>
 </section>
@@ -163,7 +194,7 @@ ${primary?`<div class="hero">${heroImageUri?`<img class="hero-background" src="$
 <p class="count-caption" id="notes-count"></p>
 <div class="note-list" id="notes-list"></div>
 <button class="load-more" id="notes-more" hidden>再看 50 条</button>
-<div class="panel"><h2>已保存的读书卡片</h2><div id="cards-list"></div></div>
+<div class="panel"><h2>已保存的读书卡片</h2><p class="muted small">想写书评时，在对话里选几条笔记，说“帮我看看哪个观点值得写”。</p><div id="cards-list"></div></div>
 </section>
 <section class="page" id="page-readers">
 <div class="intro"><h1>谁也在认真读这里</h1><p>从一段有共鸣的想法，发现值得继续了解的人。</p></div>

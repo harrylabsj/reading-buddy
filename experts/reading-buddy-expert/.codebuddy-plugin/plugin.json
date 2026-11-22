@@ -1,6 +1,6 @@
 {
   "name": "reading-buddy-expert",
-  "version": "0.6.0",
+  "version": "0.9.0",
   "description": "A local-first WeRead reading companion that organizes shelves, notes, cards, reviews, and public reader discoveries.",
   "author": {
     "name": "北京海纳福星文化传媒有限公司",
@@ -23,8 +23,8 @@
     "en": "Reading Buddy"
   },
   "displayDescription": {
-    "zh": "连接微信读书，在本机整理笔记、读书卡片和阅读复盘，从公开想法发现值得交流的读友，数据独立保存。",
-    "en": "Organize WeRead notes, cards and reading reviews locally, and discover readers through public thoughts."
+    "zh": "贴一段摘录，聊聊为什么划下它。用共读书签记住你的问题和判断，下次接着读，也能从笔记里选论点，写出有出处的书评。",
+    "en": "Start with a passage, save your question and interpretation locally, and pick up the discussion next time. Compare interpretations and turn selected notes into a sourced book review."
   },
   "avatar": "avatars/reading-buddy.png",
   "categoryId": "15-Education",
@@ -43,8 +43,8 @@
       "en": "Reading Review"
     },
     {
-      "zh": "发现同频人",
-      "en": "Find Like-minded Readers"
+      "zh": "共读书签",
+      "en": "Co-reading Bookmarks"
     }
   ],
   "quickPrompts": [

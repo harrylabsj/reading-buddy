@@ -425,7 +425,8 @@ const jsonResponse=(body,status=200)=>({status,ok:status>=200&&status<300,json:a
 function mockGateway(responder){globalThis.fetch=async(_url,options)=>{const body=JSON.parse(String(options.body));return responder(body.api_name,body);};}
 
 test('sync awaits completion and exits with updated snapshot (mocked gateway)',async()=>{
-  mockGateway(apiName=>{
+  mockGateway((apiName,body)=>{
+    assert.equal(body.skill_version,'1.0.5');
     switch(apiName){
       case '/readdata/detail':return jsonResponse({readLongest:[{book:{bookId:'b1'},readTime:600}],readTimes:{},totalReadTime:3600,readDays:2});
       case '/shelf/sync':return jsonResponse({books:[{bookId:'b1',title:'同步测试书',author:'作者甲',finishReading:0}],albums:[],mp:{}});
@@ -448,6 +449,18 @@ test('sync awaits completion and exits with updated snapshot (mocked gateway)',a
   assert.equal(p.snapshot.weekly.totalSeconds,3600);
 });
 
+test('upgrade response pauses sync, retains snapshot, and provides actionable version details',async()=>{
+  const {readProfile}=await import('../server/storage.mjs');
+  const before=readProfile().snapshot;
+  mockGateway(()=>jsonResponse({upgrade_info:{current_version:'1.0.5',latest_version:'1.0.6',upgrade_url:'https://untrusted.invalid/evil'}}));
+  let stderr='';
+  assert.equal(await runCli(['sync'],{stderr:text=>{stderr=text;}}),1);
+  const error=JSON.parse(stderr).error;
+  assert.deepEqual(error.upgradeInfo,{currentVersion:'1.0.5',latestVersion:'1.0.6',officialSkillUrl:'https://cdn.weread.qq.com/skills/weread-skills.zip'});
+  assert.match(error.message,/暂停操作/);
+  assert.deepEqual(readProfile().snapshot,before);
+});
+
 test('sync classifies revoked/expired credentials as authorization exit code 3 (mocked gateway)',async()=>{
   mockGateway(()=>jsonResponse({errcode:401},401));
   let stderr='';
@@ -462,4 +475,109 @@ test('sync classifies rate limiting as exit code 5 (mocked gateway)',async()=>{
   const code=await runCli(['sync'],{stderr:text=>{stderr=text;}});
   assert.equal(code,5,'429 应退出 5');
   assert.match(stderr,/请求较多/);
+});
+
+test('manual co-reading survives a fresh offline session, retry, stale writes and backup merge', () => {
+  const {data, config} = dirs();
+  const env = {
+    READING_DATA_DIR:data, READING_CONFIG_DIR:config, READING_OFFLINE_GUARD:'1',
+    NODE_OPTIONS:'--import=' + pathToFileURL(resolve('tests/offline-guard.mjs')).href
+  };
+  const cli = args => run(args,{env});
+  const file = join(data,'bookmark-input.json');
+  const save = input => {
+    writeFileSync(file,JSON.stringify(input));
+    return cli(['bookmark-save','--input',file]);
+  };
+  const first = {
+    title:'山间来信', question:'为什么要放慢？', judgment:'我先想到的是休息。',
+    nextQuestion:'人物停下后看见什么？', excerpt:'<一封信>', parent:null
+  };
+  const start = save(first);
+  assert.equal(start.code,0,start.stderr);
+  assert.equal(save(first).json.id,start.json.id);
+  const catalog = cli(['bookmarks','--query','山间']).json;
+  assert.deepEqual(catalog.books.map(b=>b.key),[start.json.key]);
+  assert.ok(!JSON.stringify(catalog).includes(first.judgment));
+  assert.equal(cli(['doctor']).json.state,'local-reading');
+  const copy = join(data,'backup.json');
+  assert.equal(cli(['backup','export',copy]).code,0);
+  const second = {...first,parent:start.json.id,judgment:'我现在觉得是为了观察。'};
+  const changed = save(second);
+  assert.equal(changed.code,0,changed.stderr);
+  assert.notEqual(changed.json.id,start.json.id);
+  assert.notEqual(save({...second,judgment:'另一个过期的修改'}).code,0);
+  assert.equal(cli(['backup','import',copy]).code,0);
+  const resume = cli(['bookmark-resume',start.json.key]).json;
+  assert.equal(resume.total,2);
+  assert.deepEqual(resume.entries.map(r=>r.judgment),[second.judgment,first.judgment]);
+  assert.equal(resume.entries[0].parent,resume.entries[1].id);
+  const workspace = cli(['workspace']);
+  assert.equal(workspace.code,0,workspace.stderr);
+  const html = readFileSync(workspace.json.path,'utf8');
+  assert.ok(html.includes(second.judgment));
+  assert.ok(html.includes('&lt;一封信&gt;'));
+  assert.ok(!html.includes('<一封信>'));
+  const otherAccount = run(['bookmarks'],{env:{...env,WEREAD_API_KEY:CANARY}});
+  assert.deepEqual(otherAccount.json.books,[]);
+  assert.equal(cli(['bookmarks','--mode','demo']).json.books.length,0);
+  const legacy = JSON.parse(readFileSync(copy,'utf8'));
+  delete legacy.bookmarkEntries;
+  writeFileSync(copy,JSON.stringify(legacy));
+  assert.equal(cli(['backup','import',copy]).code,0);
+  assert.equal(cli(['bookmark-resume',start.json.key]).json.total,2);
+});
+
+test('selected note bookmark keeps its own evidence and rejects a note from another book', () => {
+  const {data,config} = dirs();
+  const env = {READING_DATA_DIR:data,READING_CONFIG_DIR:config};
+  const cli = args => run([...args,'--mode','demo'],{env});
+  const file = join(data,'input.json');
+  const draft = {
+    bookId:'demo-mountain',noteId:'demo-note-1',parent:null,
+    question:'山意味着什么？',judgment:'我想到自省。',nextQuestion:'另一封信怎么写？'
+  };
+  // A second shelf book with no notes makes the cross-book validation observable.
+  const backup = join(data,'demo-backup.json');
+  assert.equal(cli(['backup','export',backup]).code,0);
+  const profile = JSON.parse(readFileSync(backup,'utf8'));
+  profile.snapshot.books.push({...profile.snapshot.books[0],id:'another-book'});
+  profile.snapshot.syncedAt = new Date(Date.now()+1000).toISOString();
+  writeFileSync(backup,JSON.stringify(profile));
+  assert.equal(cli(['backup','import',backup]).code,0);
+  writeFileSync(file,JSON.stringify({...draft,bookId:'another-book'}));
+  assert.equal(cli(['bookmark-save','--input',file]).code,4);
+  assert.deepEqual(cli(['bookmarks']).json.books,[]);
+  writeFileSync(file,JSON.stringify(draft));
+  const saved = cli(['bookmark-save','--input',file]);
+  assert.equal(saved.code,0,saved.stderr);
+  const result = cli(['bookmark-resume',saved.json.key]).json.entries[0];
+  const note = profile.snapshot.notes.find(n=>n.id===draft.noteId);
+  assert.deepEqual(result.source,{kind:'note',noteId:note.id,chapter:note.chapter,quote:note.quote,thought:note.thought,truncated:false});
+});
+
+test('two fresh sessions appending to the same bookmark cannot silently overwrite each other', async () => {
+  const {data,config} = dirs();
+  const env = {...cleanEnv(),READING_DATA_DIR:data,READING_CONFIG_DIR:config};
+  const first = {title:'山间来信',parent:null,excerpt:'山间的风',question:'作者听见了什么？',judgment:'风声。',nextQuestion:'还有什么？'};
+  function inputFile(name,input) {
+    const path = join(data,name+'.json');
+    writeFileSync(path,JSON.stringify(input));
+    return path;
+  }
+  const saved = run(['bookmark-save','--input',inputFile('first',first)],{env});
+  assert.equal(saved.code,0,saved.stderr);
+  const attempts = ['雨声。','鸟鸣。'].map((judgment,index) => {
+    const path = inputFile('next'+index,{...first,parent:saved.json.id,judgment});
+    return new Promise((resolve,reject) => {
+      const child = spawn(process.execPath,[CLI,'bookmark-save','--input',path],{env,stdio:'ignore'});
+      child.once('error',reject);
+      child.once('exit',resolve);
+    });
+  });
+  const statuses = await Promise.all(attempts);
+  assert.deepEqual(statuses.sort(),[0,1]);
+  const history = run(['bookmark-resume',saved.json.key],{env}).json;
+  assert.equal(history.total,2);
+  assert.equal(history.entries[0].parent,saved.json.id);
 });
